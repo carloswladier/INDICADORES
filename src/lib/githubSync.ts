@@ -1,7 +1,7 @@
 export const DEFAULT_GITHUB_URLS = {
-  at1: "https://raw.githubusercontent.com/carloswladier/DASH_AT1_G1/main/DASH%20AT1%20PERSONA_ATUALIZADO.xlsx",
-  outage: "https://raw.githubusercontent.com/carloswladier/DASH_AT1_G1/main/OUTAGE_SGO.xlsx",
-  revisita: "https://raw.githubusercontent.com/carloswladier/DASH_AT1_G1/main/REVISITA_30D_Norte.xlsx",
+  at1: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/DASH%20AT1%20PERSONA_ATUALIZADO.xlsx",
+  outage: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/OUTAGE_SGO.xlsx",
+  revisita: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/REVISITA_30D_Norte.xlsx",
 };
 
 export function getEnvValue(key: string, altKeys: string[] = [], fallback = ''): string {
@@ -50,15 +50,35 @@ export async function fetchGithubFileArrayBuffer(targetUrl: string): Promise<Arr
   const primaryUrl = normalizeGithubRawUrl(targetUrl);
   
   // Array of URL candidates to attempt
-  const candidates = [primaryUrl];
+  const candidates: string[] = [primaryUrl];
   
-  // If targetUrl contains the old file name, also add the new file name candidate
+  // Also add original targetUrl in case it was already raw
+  if (targetUrl && targetUrl !== primaryUrl) {
+    candidates.push(targetUrl.trim().replace(/ /g, '%20'));
+  }
+
+  // If URL has DASH_AT1_G1, also try INDICADORES
+  if (primaryUrl.includes('DASH_AT1_G1')) {
+    candidates.push(primaryUrl.replace('DASH_AT1_G1', 'INDICADORES'));
+  }
+  // If URL has INDICADORES, also try DASH_AT1_G1
+  if (primaryUrl.includes('INDICADORES')) {
+    candidates.push(primaryUrl.replace('INDICADORES', 'DASH_AT1_G1'));
+  }
+  
+  // If targetUrl contains revisita filename variations
   if (primaryUrl.includes('REVISITA_30D_202608_Norte.xlsx')) {
     candidates.push(primaryUrl.replace('REVISITA_30D_202608_Norte.xlsx', 'REVISITA_30D_Norte.xlsx'));
   }
+  if (primaryUrl.includes('REVISITA_30D_Norte.xlsx')) {
+    candidates.push(primaryUrl.replace('REVISITA_30D_Norte.xlsx', 'REVISITA_30D_202608_Norte.xlsx'));
+  }
+
+  // Remove duplicates
+  const uniqueCandidates = Array.from(new Set(candidates));
   
   // Try direct fetch first for all candidate URLs
-  for (const url of candidates) {
+  for (const url of uniqueCandidates) {
     try {
       const res = await fetch(url);
       if (res.ok) {
@@ -70,7 +90,7 @@ export async function fetchGithubFileArrayBuffer(targetUrl: string): Promise<Arr
   }
   
   // If direct fetch fails, attempt via server proxy endpoint
-  for (const url of candidates) {
+  for (const url of uniqueCandidates) {
     try {
       const proxyUrl = `/api/proxy-github?url=${encodeURIComponent(url)}`;
       const res = await fetch(proxyUrl);

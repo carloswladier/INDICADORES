@@ -56,7 +56,7 @@ import {
 } from 'recharts';
 import { MultiFilterSelect } from './MultiFilterSelect';
 import { cn, formatPercent, formatDecimal } from '../lib/utils';
-import { getGithubOutageUrl, normalizeGithubRawUrl } from '../lib/githubSync';
+import { getGithubOutageUrl, normalizeGithubRawUrl, fetchGithubFileArrayBuffer } from '../lib/githubSync';
 
 export interface OutageEvent {
   id: string | number;
@@ -1562,18 +1562,12 @@ export default function OutageDashboard() {
     setImportError(null);
 
     try {
-      const rawUrl = normalizeGithubRawUrl(targetUrl);
-
       setImportProgress(40);
-      const response = await fetch(rawUrl);
-      if (!response.ok) {
-        throw new Error(`Falha no download (${response.status}: ${response.statusText})`);
-      }
-
+      const arrayBuffer = await fetchGithubFileArrayBuffer(targetUrl);
       setImportProgress(70);
-      const arrayBuffer = await response.arrayBuffer();
       processExcelFile(arrayBuffer);
       setShowGithubInput(false);
+      setGithubUrl('');
     } catch (err: any) {
       setImportError(`Erro ao carregar dados do GitHub: ${err.message}. Verifique se a URL está correta.`);
       setIsImporting(false);

@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { MultiFilterSelect } from './MultiFilterSelect';
 import { motion, AnimatePresence } from 'motion/react';
+import { fetchGithubFileArrayBuffer, normalizeGithubRawUrl } from '../lib/githubSync';
 import { 
   BarChart, 
   Bar, 
@@ -680,21 +681,7 @@ export default function AT5Dashboard() {
     setIsGithubLoading(true);
 
     try {
-      let rawUrl = targetUrl.trim();
-      
-      // Normalize normal GitHub URL (e.g. github.com/.../blob/...) to a downloadable raw URL
-      if (rawUrl.includes('github.com') && rawUrl.includes('/blob/')) {
-        rawUrl = rawUrl
-          .replace('github.com', 'raw.githubusercontent.com')
-          .replace('/blob/', '/');
-      }
-
-      const response = await fetch(rawUrl);
-      if (!response.ok) {
-        throw new Error(`Falha ao baixar o arquivo: HTTP ${response.status} ${response.statusText}`);
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
+      const arrayBuffer = await fetchGithubFileArrayBuffer(targetUrl);
       const success = processExcelData(arrayBuffer);
       if (success) {
         setGithubUrl('');

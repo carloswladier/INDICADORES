@@ -58,7 +58,7 @@ import { MOCK_DATA, VisitData, Technology, BaseCidadeData, MOCK_BASE_CIDADE } fr
 import { cn, formatPercent, formatDecimal } from './lib/utils';
 import { logApi, LogEntry as ApiLogEntry } from './services/api';
 import { getDbConfig, setDbConfig } from './lib/database';
-import { getGithubAt1Url, normalizeGithubRawUrl } from './lib/githubSync';
+import { getGithubAt1Url, normalizeGithubRawUrl, fetchGithubFileArrayBuffer } from './lib/githubSync';
 import AT5Dashboard from './components/AT5Dashboard';
 import LOGDashboard from './components/LOGDashboard';
 import OutageDashboard from './components/OutageDashboard';
@@ -2003,32 +2003,18 @@ export default function App() {
     const preConfiguredUrl = getGithubAt1Url();
     const targetUrl = (typeof urlToLoad === 'string' ? urlToLoad : null) || githubUrl || preConfiguredUrl;
     if (!targetUrl) return;
-    
-    const rawUrl = normalizeGithubRawUrl(targetUrl);
 
     setIsImporting(true);
-    setImportProgress(0);
+    setImportProgress(20);
     setImportError(null);
 
     try {
-      console.log('Tentando baixar do GitHub (AT1):', rawUrl);
-      const response = await fetch(rawUrl);
-      if (!response.ok) {
-        console.error('Falha no download do GitHub:', response.status, response.statusText);
-        throw new Error(`Erro ao baixar arquivo do GitHub (${response.status}: ${response.statusText}). Verifique se a URL está correta e se o repositório é público.`);
-      }
-      
-      const blob = await response.blob();
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        processExcelData(evt.target?.result);
-        setShowGithubInput(false);
-      };
-      reader.onerror = () => {
-        setImportError('Erro ao ler o arquivo baixado.');
-        setIsImporting(false);
-      };
-      reader.readAsBinaryString(blob);
+      setImportProgress(40);
+      const arrayBuffer = await fetchGithubFileArrayBuffer(targetUrl);
+      setImportProgress(70);
+      processExcelData(arrayBuffer);
+      setShowGithubInput(false);
+      setGithubUrl('');
     } catch (err: any) {
       setImportError(err.message || 'Erro ao carregar do GitHub.');
       setIsImporting(false);
