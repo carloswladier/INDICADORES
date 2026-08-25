@@ -193,20 +193,7 @@ const INITIAL_MOCK_REVISITA = generateMockRevisita30DData();
 const COLORS_SERIES = ['#EE1D23', '#333333', '#475569', '#10B981', '#F59E0B', '#3B82F6', '#8B5CF6', '#EC4899'];
 
 export default function Revisita30DDashboard() {
-  const [data, setData] = useState<Revisita30DRow[]>(() => {
-    const saved = localStorage.getItem('REVISITA_30D_DATA_V3');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      } catch (e) {
-        return INITIAL_MOCK_REVISITA;
-      }
-    }
-    return INITIAL_MOCK_REVISITA;
-  });
+  const [data, setData] = useState<Revisita30DRow[]>([]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -256,13 +243,14 @@ export default function Revisita30DDashboard() {
   const [techMetric, setTechMetric] = useState<'nota' | 'semPadrao'>('nota');
   const [techSort, setTechSort] = useState<'nota' | 'semPadrao' | 'volume'>('nota');
 
+  // Clear any legacy localStorage data on mount to ensure fresh state
   useEffect(() => {
     try {
-      localStorage.setItem('REVISITA_30D_DATA_V3', JSON.stringify(data));
+      localStorage.removeItem('REVISITA_30D_DATA_V3');
     } catch (err) {
-      console.warn('[Revisita30D] Storage quota exceeded, skipping localStorage save:', err);
+      // ignore
     }
-  }, [data]);
+  }, []);
 
   // Generic Excel processor supporting exact column mappings (ESTR_MUNICIPIO, NM_EMPRESA_NEW, NM_UN_NEW, NR_CONTRATO, QTD_REVISITAS)
   const processExcelData = (ab: ArrayBuffer): boolean => {
@@ -1276,6 +1264,36 @@ export default function Revisita30DDashboard() {
         </div>
       )}
 
+      {data.length === 0 ? (
+        <div className="bg-white rounded-[32px] border border-slate-200/80 shadow-sm p-12 text-center flex flex-col items-center justify-center my-6">
+          <div className="w-14 h-14 bg-red-50 rounded-2xl flex items-center justify-center mb-4">
+            <FileSpreadsheet className="w-7 h-7 text-[#EE1D23]" />
+          </div>
+          <h3 className="text-xl font-black text-slate-800 uppercase italic tracking-tight mb-2">
+            Nenhum Dado de Revisita 30D Carregado
+          </h3>
+          <p className="text-xs text-slate-400 max-w-md mb-6 leading-relaxed font-bold uppercase tracking-wider">
+            Sincronize com o GitHub ou importe a planilha Excel (REVISITA_30D.xlsx) para visualizar os indicadores de repetição e retrabalho.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              onClick={() => handleGithubLoad(getGithubRevisitaUrl())}
+              className="flex items-center gap-2 bg-[#EE1D23] hover:bg-red-600 text-white font-black py-2.5 px-5 rounded-xl transition-all shadow-md shadow-red-500/15 active:scale-95 uppercase italic text-xs cursor-pointer"
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Sincronizar GitHub</span>
+            </button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-800 font-black py-2.5 px-5 rounded-xl border border-slate-200 transition-all shadow-2xs active:scale-95 uppercase italic text-xs cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5 text-[#EE1D23]" />
+              <span>Importar Excel</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Filters Section */}
       <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
         <div className="flex items-center justify-between">
@@ -2528,6 +2546,8 @@ export default function Revisita30DDashboard() {
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

@@ -33,7 +33,9 @@ import {
   ArrowUpDown,
   Building2,
   ListFilter,
-  Trash2
+  Trash2,
+  UserCheck,
+  PlayCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -58,6 +60,15 @@ import { MultiFilterSelect } from './MultiFilterSelect';
 import { cn, formatPercent, formatDecimal } from '../lib/utils';
 import { getGithubOutageUrl, normalizeGithubRawUrl, fetchGithubFileArrayBuffer } from '../lib/githubSync';
 
+export type OutageStatus = 
+  | 'CANCELADO' 
+  | 'DESIGNADO' 
+  | 'EM PROGRESSO' 
+  | 'FECHADO' 
+  | 'PENDENTE' 
+  | 'RESOLVIDO' 
+  | string;
+
 export interface OutageEvent {
   id: string | number;
   numeroEvento: string;
@@ -68,7 +79,7 @@ export interface OutageEvent {
   tipo: string;     // Column 'Tipo' (EMERGENCIAL, INFORMATIVO, CORRETIVO, etc.)
   tipoOutage: string; 
   topologia: string; // Column 'Topologia' (Node real from Excel)
-  status: 'Resolvido' | 'Fechado' | 'Cancelado' | 'Em Andamento';
+  status: OutageStatus;
   dataInicio: string; // YYYY-MM-DD
   dataFim?: string | null;
   nodeAfetado?: string;
@@ -278,13 +289,15 @@ const generateExactReferenceOutageData = (): OutageEvent[] => {
         const topologia = nodes[nodeIdx];
 
         const randStatus = (i * 17 + eventCounter * 3) % 100;
-        let status: OutageEvent['status'] = 'Resolvido';
-        if (randStatus < 58) status = 'Resolvido';
-        else if (randStatus < 86) status = 'Fechado';
-        else if (randStatus < 96) status = 'Cancelado';
-        else status = 'Em Andamento';
+        let status: OutageStatus = 'RESOLVIDO';
+        if (randStatus < 45) status = 'RESOLVIDO';
+        else if (randStatus < 58) status = 'FECHADO';
+        else if (randStatus < 95) status = 'CANCELADO';
+        else if (randStatus < 97) status = 'DESIGNADO';
+        else if (randStatus < 99) status = 'PENDENTE';
+        else status = 'EM PROGRESSO';
 
-        const duracao = status === 'Cancelado' ? 0 : Math.floor(35 + ((i * 29) % 360));
+        const duracao = status === 'CANCELADO' ? 0 : Math.floor(35 + ((i * 29) % 360));
         const clientes = Math.floor(80 + ((i * 97) % 2400));
 
         list.push({
@@ -299,7 +312,7 @@ const generateExactReferenceOutageData = (): OutageEvent[] => {
           topologia: topologia,
           status: status,
           dataInicio: dateStr,
-          dataFim: status === 'Em Andamento' ? null : dateStr,
+          dataFim: (status === 'EM PROGRESSO' || status === 'PENDENTE' || status === 'DESIGNADO') ? null : dateStr,
           nodeAfetado: topologia,
           clientesAfetados: clientes,
           duracaoMinutos: duracao,
@@ -332,13 +345,15 @@ const generateExactReferenceOutageData = (): OutageEvent[] => {
         const topologia = nodes[nodeIdx];
 
         const randStatus = (i * 17 + eventCounter * 3) % 100;
-        let status: OutageEvent['status'] = 'Resolvido';
-        if (randStatus < 58) status = 'Resolvido';
-        else if (randStatus < 86) status = 'Fechado';
-        else if (randStatus < 96) status = 'Cancelado';
-        else status = 'Em Andamento';
+        let status: OutageStatus = 'RESOLVIDO';
+        if (randStatus < 45) status = 'RESOLVIDO';
+        else if (randStatus < 58) status = 'FECHADO';
+        else if (randStatus < 95) status = 'CANCELADO';
+        else if (randStatus < 97) status = 'DESIGNADO';
+        else if (randStatus < 99) status = 'PENDENTE';
+        else status = 'EM PROGRESSO';
 
-        const duracao = status === 'Cancelado' ? 0 : Math.floor(35 + ((i * 29) % 360));
+        const duracao = status === 'CANCELADO' ? 0 : Math.floor(35 + ((i * 29) % 360));
         const clientes = Math.floor(80 + ((i * 97) % 2400));
 
         list.push({
@@ -353,7 +368,7 @@ const generateExactReferenceOutageData = (): OutageEvent[] => {
           topologia: topologia,
           status: status,
           dataInicio: dateStr,
-          dataFim: status === 'Em Andamento' ? null : dateStr,
+          dataFim: (status === 'EM PROGRESSO' || status === 'PENDENTE' || status === 'DESIGNADO') ? null : dateStr,
           nodeAfetado: topologia,
           clientesAfetados: clientes,
           duracaoMinutos: duracao,
@@ -365,7 +380,7 @@ const generateExactReferenceOutageData = (): OutageEvent[] => {
       }
 
       // Generate Agosto (Month 8) up to 24/08 (Total 6.672 events)
-      // Resolvido: 3021, Fechado: 849, Cancelado: 2796, Em Andamento: 6
+      // Resolvido: 3005, Fechado: 849, Cancelado: 2796, Designado: 15, Pendente: 6, Em Progresso: 1
       for (let i = 0; i < countAgosto; i++) {
         const day = ((agoCounter * 7 + i) % 24) + 1; // Days 1 to 24
         const dayStr = String(day).padStart(2, '0');
@@ -386,19 +401,23 @@ const generateExactReferenceOutageData = (): OutageEvent[] => {
         const nodeIdx = (i + (eventCounter % 5)) % nodes.length;
         const topologia = nodes[nodeIdx];
 
-        let status: OutageEvent['status'] = 'Resolvido';
+        let status: OutageStatus = 'RESOLVIDO';
         const statusMod = agoCounter % 6672;
-        if (statusMod < 3021) {
-          status = 'Resolvido';
-        } else if (statusMod < 3021 + 849) {
-          status = 'Fechado';
-        } else if (statusMod < 3021 + 849 + 2796) {
-          status = 'Cancelado';
+        if (statusMod < 3005) {
+          status = 'RESOLVIDO';
+        } else if (statusMod < 3005 + 849) {
+          status = 'FECHADO';
+        } else if (statusMod < 3005 + 849 + 2796) {
+          status = 'CANCELADO';
+        } else if (statusMod < 3005 + 849 + 2796 + 15) {
+          status = 'DESIGNADO';
+        } else if (statusMod < 3005 + 849 + 2796 + 15 + 6) {
+          status = 'PENDENTE';
         } else {
-          status = 'Em Andamento';
+          status = 'EM PROGRESSO';
         }
 
-        const duracao = status === 'Cancelado' ? 0 : Math.floor(35 + ((i * 29) % 360));
+        const duracao = status === 'CANCELADO' ? 0 : Math.floor(35 + ((i * 29) % 360));
         const clientes = Math.floor(80 + ((i * 97) % 2400));
 
         list.push({
@@ -413,7 +432,7 @@ const generateExactReferenceOutageData = (): OutageEvent[] => {
           topologia: topologia,
           status: status,
           dataInicio: dateStr,
-          dataFim: status === 'Em Andamento' ? null : dateStr,
+          dataFim: (status === 'EM PROGRESSO' || status === 'PENDENTE' || status === 'DESIGNADO') ? null : dateStr,
           nodeAfetado: topologia,
           clientesAfetados: clientes,
           duracaoMinutos: duracao,
@@ -431,7 +450,7 @@ const generateExactReferenceOutageData = (): OutageEvent[] => {
 };
 
 export default function OutageDashboard() {
-  const [data, setData] = useState<OutageEvent[]>(() => generateExactReferenceOutageData());
+  const [data, setData] = useState<OutageEvent[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importError, setImportError] = useState<string | null>(null);
@@ -473,7 +492,11 @@ export default function OutageDashboard() {
     const cidades = ['Todos', ...Array.from(new Set(data.map(d => d.cidade))).sort((a, b) => a.localeCompare(b, 'pt-BR'))];
     const catProd2List = ['Todos', ...Array.from(new Set(data.map(d => d.catProd2).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR'))];
     const tipos = ['Todos', ...Array.from(new Set(data.map(d => d.tipo || d.tipoOutage).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR'))];
-    const statuses = ['Todos', 'Resolvido', 'Fechado', 'Cancelado', 'Em Andamento'];
+    // Explicit standard status list: CANCELADO, DESIGNADO, EM PROGRESSO, FECHADO, PENDENTE, RESOLVIDO
+    const standardStatuses = ['CANCELADO', 'DESIGNADO', 'EM PROGRESSO', 'FECHADO', 'PENDENTE', 'RESOLVIDO'];
+    const otherStatuses = Array.from(new Set(data.map(d => (d.status || '').toUpperCase()).filter(Boolean)))
+      .filter(s => !standardStatuses.includes(s));
+    const statuses = ['Todos', ...standardStatuses, ...otherStatuses];
 
     return { meses, semanas, cidades, catProd2List, tipos, statuses };
   }, [data]);
@@ -576,10 +599,14 @@ export default function OutageDashboard() {
   // Metrics calculation
   const metrics = useMemo(() => {
     const total = filteredData.length;
-    const resolvido = filteredData.filter(d => d.status === 'Resolvido').length;
-    const fechado = filteredData.filter(d => d.status === 'Fechado').length;
-    const cancelado = filteredData.filter(d => d.status === 'Cancelado').length;
-    const emAndamento = filteredData.filter(d => d.status === 'Em Andamento').length;
+    const norm = (s: any) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    
+    const resolvido = filteredData.filter(d => norm(d.status).includes('resolv')).length;
+    const fechado = filteredData.filter(d => norm(d.status).includes('fechad') || norm(d.status).includes('conclu') || norm(d.status).includes('encerr')).length;
+    const cancelado = filteredData.filter(d => norm(d.status).includes('cancel')).length;
+    const emProgresso = filteredData.filter(d => norm(d.status).includes('progresso') || norm(d.status).includes('andamento') || norm(d.status).includes('abert')).length;
+    const designado = filteredData.filter(d => norm(d.status).includes('designad')).length;
+    const pendente = filteredData.filter(d => norm(d.status).includes('pendent')).length;
 
     const totalClientes = filteredData.reduce((acc, d) => acc + (d.clientesAfetados || 0), 0);
     const validDurations = filteredData.filter(d => d.duracaoMinutos && d.duracaoMinutos > 0);
@@ -592,11 +619,17 @@ export default function OutageDashboard() {
       resolvido,
       fechado,
       cancelado,
-      emAndamento,
+      emProgresso,
+      designado,
+      pendente,
+      emAndamento: emProgresso,
       resolvidoPct: total > 0 ? (resolvido / total) * 100 : 0,
       fechadoPct: total > 0 ? (fechado / total) * 100 : 0,
       canceladoPct: total > 0 ? (cancelado / total) * 100 : 0,
-      emAndamentoPct: total > 0 ? (emAndamento / total) * 100 : 0,
+      emProgressoPct: total > 0 ? (emProgresso / total) * 100 : 0,
+      designadoPct: total > 0 ? (designado / total) * 100 : 0,
+      pendentePct: total > 0 ? (pendente / total) * 100 : 0,
+      emAndamentoPct: total > 0 ? (emProgresso / total) * 100 : 0,
       totalClientes,
       mttrMedioMinutos
     };
@@ -719,9 +752,10 @@ export default function OutageDashboard() {
       }
       map[node].total += 1;
       map[node].clientes += (item.clientesAfetados || 0);
-      if (item.status === 'Resolvido') map[node].resolvido += 1;
-      if (item.status === 'Fechado') map[node].fechado += 1;
-      if (item.status === 'Cancelado') map[node].cancelado += 1;
+      const stUpper = (item.status || '').toString().toUpperCase();
+      if (stUpper.includes('RESOLV')) map[node].resolvido += 1;
+      if (stUpper.includes('FECHAD') || stUpper.includes('CONCLU') || stUpper.includes('ENCERR')) map[node].fechado += 1;
+      if (stUpper.includes('CANCEL')) map[node].cancelado += 1;
     });
 
     return Object.values(map)
@@ -729,9 +763,30 @@ export default function OutageDashboard() {
       .slice(0, topNodesCount);
   }, [filteredData, topNodesCount]);
 
+  // Status configuration for colors and sorting
+  const STATUS_CONFIG: Record<string, { color: string; order: number }> = {
+    'CANCELADO': { color: '#EE1D23', order: 1 },
+    'DESIGNADO': { color: '#8B5CF6', order: 2 },
+    'EM PROGRESSO': { color: '#F59E0B', order: 3 },
+    'FECHADO': { color: '#2563EB', order: 4 },
+    'PENDENTE': { color: '#F97316', order: 5 },
+    'RESOLVIDO': { color: '#059669', order: 6 },
+  };
+
   // Chart: Daily Events Evolution
   const dailyChartData = useMemo(() => {
-    const map: Record<string, { date: string; displayDate: string; Resolvido: number; Fechado: number; Cancelado: number; 'Em Andamento': number; Total: number }> = {};
+    const map: Record<string, { 
+      date: string; 
+      displayDate: string; 
+      CANCELADO: number;
+      DESIGNADO: number;
+      'EM PROGRESSO': number;
+      FECHADO: number;
+      PENDENTE: number;
+      RESOLVIDO: number;
+      Total: number;
+      [key: string]: any;
+    }> = {};
 
     filteredData.forEach(item => {
       const d = item.dataInicio || 'Indefinido';
@@ -741,9 +796,30 @@ export default function OutageDashboard() {
           const parts = d.split('-');
           if (parts.length === 3) display = `${parts[2]}/${parts[1]}`;
         }
-        map[d] = { date: d, displayDate: display, Resolvido: 0, Fechado: 0, Cancelado: 0, 'Em Andamento': 0, Total: 0 };
+        map[d] = { 
+          date: d, 
+          displayDate: display, 
+          CANCELADO: 0,
+          DESIGNADO: 0,
+          'EM PROGRESSO': 0,
+          FECHADO: 0,
+          PENDENTE: 0,
+          RESOLVIDO: 0,
+          Total: 0 
+        };
       }
-      map[d][item.status] = (map[d][item.status] || 0) + 1;
+
+      const rawSt = (item.status || 'RESOLVIDO').toString().toUpperCase().trim();
+      let normalizedKey = 'RESOLVIDO';
+      if (rawSt.includes('CANC') || rawSt.includes('IMPROD') || rawSt.includes('ANUL')) normalizedKey = 'CANCELADO';
+      else if (rawSt.includes('DESIG')) normalizedKey = 'DESIGNADO';
+      else if (rawSt.includes('PROG') || rawSt.includes('ANDAM') || rawSt.includes('ABERT') || rawSt.includes('CAMPO')) normalizedKey = 'EM PROGRESSO';
+      else if (rawSt.includes('FECH') || rawSt.includes('CONCL') || rawSt.includes('ENCERR')) normalizedKey = 'FECHADO';
+      else if (rawSt.includes('PEND')) normalizedKey = 'PENDENTE';
+      else if (rawSt.includes('RESOLV')) normalizedKey = 'RESOLVIDO';
+      else normalizedKey = rawSt;
+
+      map[d][normalizedKey] = (map[d][normalizedKey] || 0) + 1;
       map[d].Total += 1;
     });
 
@@ -752,13 +828,30 @@ export default function OutageDashboard() {
 
   // Chart: Status Breakdown
   const statusPieData = useMemo(() => {
-    return [
-      { name: 'Resolvido', value: metrics.resolvido, color: '#059669' },
-      { name: 'Fechado', value: metrics.fechado, color: '#2563EB' },
-      { name: 'Cancelado', value: metrics.cancelado, color: '#EE1D23' },
-      { name: 'Em Andamento', value: metrics.emAndamento, color: '#F59E0B' }
-    ].filter(s => s.value > 0);
-  }, [metrics]);
+    const counts: Record<string, number> = {};
+    filteredData.forEach(d => {
+      const rawSt = (d.status || 'RESOLVIDO').toString().toUpperCase().trim();
+      let normalizedKey = 'RESOLVIDO';
+      if (rawSt.includes('CANC') || rawSt.includes('IMPROD') || rawSt.includes('ANUL')) normalizedKey = 'CANCELADO';
+      else if (rawSt.includes('DESIG')) normalizedKey = 'DESIGNADO';
+      else if (rawSt.includes('PROG') || rawSt.includes('ANDAM') || rawSt.includes('ABERT') || rawSt.includes('CAMPO')) normalizedKey = 'EM PROGRESSO';
+      else if (rawSt.includes('FECH') || rawSt.includes('CONCL') || rawSt.includes('ENCERR')) normalizedKey = 'FECHADO';
+      else if (rawSt.includes('PEND')) normalizedKey = 'PENDENTE';
+      else if (rawSt.includes('RESOLV')) normalizedKey = 'RESOLVIDO';
+      else normalizedKey = rawSt;
+
+      counts[normalizedKey] = (counts[normalizedKey] || 0) + 1;
+    });
+
+    return Object.entries(counts)
+      .map(([name, value]) => ({
+        name,
+        value,
+        color: STATUS_CONFIG[name]?.color || '#64748B'
+      }))
+      .filter(s => s.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }, [filteredData]);
 
   // Pagination for analytical table
   const paginatedData = useMemo(() => {
@@ -1383,17 +1476,23 @@ export default function OutageDashboard() {
           }
 
           // Status
-          const statusRaw = String(getVal(statusColIdx) || 'Resolvido').trim();
-          let status: OutageEvent['status'] = 'Resolvido';
-          const stLower = normalizeStr(statusRaw);
-          if (stLower.includes('fech') || stLower.includes('concl') || stLower.includes('encerr')) {
-            status = 'Fechado';
-          } else if (stLower.includes('canc') || stLower.includes('improd') || stLower.includes('anul')) {
-            status = 'Cancelado';
-          } else if (stLower.includes('abert') || stLower.includes('andamento') || stLower.includes('campo') || stLower.includes('pend')) {
-            status = 'Em Andamento';
-          } else {
-            status = 'Resolvido';
+          const statusRaw = String(getVal(statusColIdx) || 'RESOLVIDO').trim();
+          let status: OutageStatus = 'RESOLVIDO';
+          const stUpper = normalizeStr(statusRaw).toUpperCase();
+          if (stUpper.includes('CANC') || stUpper.includes('IMPROD') || stUpper.includes('ANUL')) {
+            status = 'CANCELADO';
+          } else if (stUpper.includes('DESIG')) {
+            status = 'DESIGNADO';
+          } else if (stUpper.includes('PROG') || stUpper.includes('ANDAM') || stUpper.includes('ABERT') || stUpper.includes('CAMPO')) {
+            status = 'EM PROGRESSO';
+          } else if (stUpper.includes('FECH') || stUpper.includes('CONCL') || stUpper.includes('ENCERR')) {
+            status = 'FECHADO';
+          } else if (stUpper.includes('PEND')) {
+            status = 'PENDENTE';
+          } else if (stUpper.includes('RESOLV')) {
+            status = 'RESOLVIDO';
+          } else if (statusRaw) {
+            status = statusRaw.toUpperCase();
           }
 
           // Date parsing from Início
@@ -1421,7 +1520,7 @@ export default function OutageDashboard() {
             topologia: topologia,
             status: status,
             dataInicio: parsedDate.dateStr,
-            dataFim: status === 'Em Andamento' ? null : parsedDate.dateStr,
+            dataFim: (status === 'EM PROGRESSO' || status === 'PENDENTE' || status === 'DESIGNADO') ? null : parsedDate.dateStr,
             nodeAfetado: topologia,
             clientesAfetados: isNaN(clientesRaw) || clientesRaw <= 0 ? Math.floor(100 + (globalCounter % 800)) : clientesRaw,
             duracaoMinutos: isNaN(duracaoRaw) || duracaoRaw < 0 ? 90 : duracaoRaw,
@@ -1503,13 +1602,15 @@ export default function OutageDashboard() {
                 const topologia = nodes[nodeIdx];
 
                 const randStatus = (i * 17 + globalCounter * 3) % 100;
-                let status: OutageEvent['status'] = 'Resolvido';
-                if (randStatus < 58) status = 'Resolvido';
-                else if (randStatus < 86) status = 'Fechado';
-                else if (randStatus < 96) status = 'Cancelado';
-                else status = 'Em Andamento';
+                let status: OutageStatus = 'RESOLVIDO';
+                if (randStatus < 45) status = 'RESOLVIDO';
+                else if (randStatus < 58) status = 'FECHADO';
+                else if (randStatus < 95) status = 'CANCELADO';
+                else if (randStatus < 97) status = 'DESIGNADO';
+                else if (randStatus < 99) status = 'PENDENTE';
+                else status = 'EM PROGRESSO';
 
-                const duracao = status === 'Cancelado' ? 0 : Math.floor(35 + ((i * 29) % 360));
+                const duracao = status === 'CANCELADO' ? 0 : Math.floor(35 + ((i * 29) % 360));
                 const clientes = Math.floor(80 + ((i * 97) % 2400));
 
                 parsedEvents.push({
@@ -1524,7 +1625,7 @@ export default function OutageDashboard() {
                   topologia: topologia,
                   status: status,
                   dataInicio: dateStr,
-                  dataFim: status === 'Em Andamento' ? null : dateStr,
+                  dataFim: (status === 'EM PROGRESSO' || status === 'PENDENTE' || status === 'DESIGNADO') ? null : dateStr,
                   nodeAfetado: topologia,
                   clientesAfetados: clientes,
                   duracaoMinutos: duracao,
@@ -1656,19 +1757,27 @@ export default function OutageDashboard() {
   };
 
   // Status Chip Badge Style
-  const getStatusBadge = (status: OutageEvent['status']) => {
-    switch (status) {
-      case 'Resolvido':
-        return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-      case 'Fechado':
-        return 'bg-blue-50 text-blue-700 border-blue-200';
-      case 'Cancelado':
-        return 'bg-slate-100 text-slate-600 border-slate-200';
-      case 'Em Andamento':
-        return 'bg-amber-50 text-amber-700 border-amber-200';
-      default:
-        return 'bg-slate-100 text-slate-600 border-slate-200';
+  const getStatusBadge = (status: OutageStatus) => {
+    const s = (status || '').toString().toUpperCase().trim();
+    if (s.includes('RESOLV')) {
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     }
+    if (s.includes('FECHAD') || s.includes('CONCLU') || s.includes('ENCERR')) {
+      return 'bg-blue-50 text-blue-700 border-blue-200';
+    }
+    if (s.includes('CANCEL')) {
+      return 'bg-red-50 text-red-700 border-red-200';
+    }
+    if (s.includes('DESIGNAD')) {
+      return 'bg-purple-50 text-purple-700 border-purple-200';
+    }
+    if (s.includes('PENDENT')) {
+      return 'bg-orange-50 text-orange-700 border-orange-200';
+    }
+    if (s.includes('PROGRESSO') || s.includes('ANDAMENTO') || s.includes('CAMPO') || s.includes('ABERT')) {
+      return 'bg-amber-50 text-amber-700 border-amber-200';
+    }
+    return 'bg-slate-100 text-slate-700 border-slate-200';
   };
 
   return (
@@ -1856,227 +1965,348 @@ export default function OutageDashboard() {
         )}
       </section>
 
-      {/* Filters Section */}
-      <section className="max-w-7xl mx-auto">
-        <div className="bg-white p-6 rounded-3xl shadow-md border-t-4 border-[#EE1D23]">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-2 text-[#333333] font-black uppercase italic tracking-tight">
-              <Filter className="w-4 h-4 text-[#EE1D23]" />
-              <h2>Filtros de Pesquisa - OUTAGE</h2>
+      {data.length === 0 ? (
+        <section className="max-w-2xl mx-auto mt-8 sm:mt-12 px-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white p-6 sm:p-8 rounded-3xl shadow-xl border border-slate-100 text-center flex flex-col items-center"
+          >
+            <div className="w-14 h-14 bg-red-50 rounded-2xl flex items-center justify-center mb-4 shadow-2xs">
+              <Radio className="w-7 h-7 text-[#EE1D23]" />
             </div>
-            {(filters.mes.length > 0 && !filters.mes.includes('Todos') || 
-              filters.semana.length > 0 && !filters.semana.includes('Todos') || 
-              filters.cidade.length > 0 && !filters.cidade.includes('Todos') || 
-              filters.catProd2.length > 0 && !filters.catProd2.includes('Todos') || 
-              filters.tipo.length > 0 && !filters.tipo.includes('Todos') || 
-              filters.status.length > 0 && !filters.status.includes('Todos') ||
-              filters.startDate || filters.endDate) && (
+            <h2 className="text-xl sm:text-2xl font-black text-[#333333] uppercase italic tracking-tight mb-2">
+              Painel de Outages & Eventos de Rede
+            </h2>
+            <p className="text-slate-500 font-bold text-xs max-w-md mb-6 leading-relaxed uppercase tracking-wide opacity-65">
+              Nenhum dado carregado. Sincronize com o GitHub ou importe a planilha Excel (OUTAGE_SGO.xlsx) para visualizar os indicadores.
+            </p>
+
+            <div className="flex flex-wrap items-center justify-center gap-3">
               <button
-                onClick={() => setFilters({
-                  mes: ['Todos'],
-                  semana: ['Todos'],
-                  cidade: ['Todos'],
-                  catProd2: ['Todos'],
-                  tipo: ['Todos'],
-                  tipoOutage: ['Todos'],
-                  status: ['Todos'],
-                  startDate: '',
-                  endDate: ''
-                })}
-                className="text-xs font-bold text-[#EE1D23] hover:underline flex items-center gap-1 cursor-pointer"
+                onClick={() => handleGithubLoad(getGithubOutageUrl())}
+                className="flex items-center gap-2 bg-[#EE1D23] hover:bg-red-600 text-white font-black py-2.5 px-5 rounded-xl transition-all shadow-md shadow-red-500/15 active:scale-95 uppercase italic text-xs cursor-pointer"
               >
-                <RotateCcw className="w-3 h-3" />
-                Limpar Filtros
+                <Activity className="w-3.5 h-3.5" />
+                <span>Sincronizar GitHub</span>
               </button>
-            )}
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* MÊS */}
-            <MultiFilterSelect 
-              label="Mês" 
-              icon={<Calendar className="w-3.5 h-3.5" />}
-              value={filters.mes}
-              options={filterOptions.meses}
-              onChange={(v) => setFilters(f => ({ ...f, mes: v }))}
-            />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-800 font-black py-2.5 px-5 rounded-xl border border-slate-200 transition-all shadow-2xs active:scale-95 uppercase italic text-xs cursor-pointer"
+              >
+                <Upload className="w-3.5 h-3.5 text-[#EE1D23]" />
+                <span>Importar Excel</span>
+              </button>
 
-            {/* SEMANA */}
-            <MultiFilterSelect 
-              label="Semana" 
-              icon={<Clock className="w-3.5 h-3.5" />}
-              value={filters.semana}
-              options={filterOptions.semanas}
-              onChange={(v) => setFilters(f => ({ ...f, semana: v }))}
-            />
-
-            {/* CIDADE */}
-            <MultiFilterSelect 
-              label="Cidade" 
-              icon={<MapPin className="w-3.5 h-3.5" />}
-              value={filters.cidade}
-              options={filterOptions.cidades}
-              onChange={(v) => setFilters(f => ({ ...f, cidade: v }))}
-            />
-
-            {/* CAT. PROD. 2 */}
-            <MultiFilterSelect 
-              label="Cat. Prod. 2" 
-              icon={<Layers className="w-3.5 h-3.5" />}
-              value={filters.catProd2}
-              options={filterOptions.catProd2List}
-              onChange={(v) => setFilters(f => ({ ...f, catProd2: v }))}
-            />
-
-            {/* TIPO */}
-            <MultiFilterSelect 
-              label="Tipo de Evento" 
-              icon={<AlertTriangle className="w-3.5 h-3.5" />}
-              value={filters.tipo}
-              options={filterOptions.tipos}
-              onChange={(v) => setFilters(f => ({ ...f, tipo: v, tipoOutage: v }))}
-            />
-
-            {/* STATUS */}
-            <MultiFilterSelect 
-              label="Status" 
-              icon={<Activity className="w-3.5 h-3.5" />}
-              value={filters.status}
-              options={filterOptions.statuses}
-              onChange={(v) => setFilters(f => ({ ...f, status: v }))}
-            />
-
-            {/* INÍCIO */}
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 ml-1">
-                <Calendar className="w-3.5 h-3.5 text-[#EE1D23]" />
-                Início
-              </label>
-              <input 
-                type="date" 
-                value={filters.startDate}
-                onChange={(e) => setFilters(f => ({ ...f, startDate: e.target.value }))}
-                className="w-full bg-slate-50 border border-slate-200/80 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#EE1D23] transition-all cursor-pointer shadow-2xs"
-              />
-            </div>
-
-            {/* FIM */}
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 ml-1">
-                <Calendar className="w-3.5 h-3.5 text-[#EE1D23]" />
-                Fim
-              </label>
-              <input 
-                type="date" 
-                value={filters.endDate}
-                onChange={(e) => setFilters(f => ({ ...f, endDate: e.target.value }))}
-                className="w-full bg-slate-50 border border-slate-200/80 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#EE1D23] transition-all cursor-pointer shadow-2xs"
-              />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Main KPI Cards Section */}
-      <section className="max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {/* TOTAL DE EVENTOS */}
-          <motion.div 
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white p-7 rounded-3xl shadow-md border border-slate-100 flex items-start justify-between relative overflow-hidden group hover:shadow-lg transition-all"
-          >
-            <div className="relative z-10">
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">Total de Eventos</p>
-              <h4 className="text-4xl font-black text-[#1A1A1A] tracking-tighter">{metrics.total.toLocaleString()}</h4>
-              <div className="mt-4 flex items-center gap-2">
-                <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1">
-                  <Users className="w-3.5 h-3.5 text-slate-400" />
-                  {metrics.totalClientes.toLocaleString()} clientes impactados
-                </span>
-              </div>
-            </div>
-            <div className="p-4 rounded-2xl shadow-lg bg-[#1A1A1A] text-white group-hover:scale-105 transition-transform">
-              <Radio className="w-7 h-7" />
+              <button
+                onClick={() => setData(generateExactReferenceOutageData())}
+                className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-4 rounded-xl transition-all shadow-2xs active:scale-95 uppercase italic text-xs cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
+                <span>Dados Exemplo</span>
+              </button>
             </div>
           </motion.div>
+        </section>
+      ) : (
+        <>
+          {/* Filters Section */}
+          <section className="max-w-7xl mx-auto">
+            <div className="bg-white p-6 rounded-3xl shadow-md border-t-4 border-[#EE1D23]">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-2 text-[#333333] font-black uppercase italic tracking-tight">
+                  <Filter className="w-4 h-4 text-[#EE1D23]" />
+                  <h2>Filtros de Pesquisa - OUTAGE</h2>
+                </div>
+                {(filters.mes.length > 0 && !filters.mes.includes('Todos') || 
+                  filters.semana.length > 0 && !filters.semana.includes('Todos') || 
+                  filters.cidade.length > 0 && !filters.cidade.includes('Todos') || 
+                  filters.catProd2.length > 0 && !filters.catProd2.includes('Todos') || 
+                  filters.tipo.length > 0 && !filters.tipo.includes('Todos') || 
+                  filters.status.length > 0 && !filters.status.includes('Todos') ||
+                  filters.startDate || filters.endDate) && (
+                  <button
+                    onClick={() => setFilters({
+                      mes: ['Todos'],
+                      semana: ['Todos'],
+                      cidade: ['Todos'],
+                      catProd2: ['Todos'],
+                      tipo: ['Todos'],
+                      tipoOutage: ['Todos'],
+                      status: ['Todos'],
+                      startDate: '',
+                      endDate: ''
+                    })}
+                    className="text-xs font-bold text-[#EE1D23] hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    Limpar Filtros
+                  </button>
+                )}
+              </div>
 
-          {/* TOTAL RESOLVIDO */}
-          <motion.div 
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.05 }}
-            className="bg-white p-7 rounded-3xl shadow-md border border-slate-100 flex items-start justify-between relative overflow-hidden group hover:shadow-lg transition-all"
-          >
-            <div className="relative z-10">
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">Total Resolvido</p>
-              <h4 className="text-4xl font-black text-[#10B981] tracking-tighter">{metrics.resolvido.toLocaleString()}</h4>
-              <div className="mt-4 flex items-center gap-3">
-                <div className="w-24 h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-[#10B981] transition-all duration-700 ease-out"
-                    style={{ width: `${metrics.resolvidoPct}%` }}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* MÊS */}
+                <MultiFilterSelect 
+                  label="Mês" 
+                  icon={<Calendar className="w-3.5 h-3.5" />}
+                  value={filters.mes}
+                  options={filterOptions.meses}
+                  onChange={(v) => setFilters(f => ({ ...f, mes: v }))}
+                />
+
+                {/* SEMANA */}
+                <MultiFilterSelect 
+                  label="Semana" 
+                  icon={<Clock className="w-3.5 h-3.5" />}
+                  value={filters.semana}
+                  options={filterOptions.semanas}
+                  onChange={(v) => setFilters(f => ({ ...f, semana: v }))}
+                />
+
+                {/* CIDADE */}
+                <MultiFilterSelect 
+                  label="Cidade" 
+                  icon={<MapPin className="w-3.5 h-3.5" />}
+                  value={filters.cidade}
+                  options={filterOptions.cidades}
+                  onChange={(v) => setFilters(f => ({ ...f, cidade: v }))}
+                />
+
+                {/* CAT. PROD. 2 */}
+                <MultiFilterSelect 
+                  label="Cat. Prod. 2" 
+                  icon={<Layers className="w-3.5 h-3.5" />}
+                  value={filters.catProd2}
+                  options={filterOptions.catProd2List}
+                  onChange={(v) => setFilters(f => ({ ...f, catProd2: v }))}
+                />
+
+                {/* TIPO */}
+                <MultiFilterSelect 
+                  label="Tipo de Evento" 
+                  icon={<AlertTriangle className="w-3.5 h-3.5" />}
+                  value={filters.tipo}
+                  options={filterOptions.tipos}
+                  onChange={(v) => setFilters(f => ({ ...f, tipo: v, tipoOutage: v }))}
+                />
+
+                {/* STATUS */}
+                <MultiFilterSelect 
+                  label="Status" 
+                  icon={<Activity className="w-3.5 h-3.5" />}
+                  value={filters.status}
+                  options={filterOptions.statuses}
+                  onChange={(v) => setFilters(f => ({ ...f, status: v }))}
+                />
+
+                {/* INÍCIO */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 ml-1">
+                    <Calendar className="w-3.5 h-3.5 text-[#EE1D23]" />
+                    Início
+                  </label>
+                  <input 
+                    type="date" 
+                    value={filters.startDate}
+                    onChange={(e) => setFilters(f => ({ ...f, startDate: e.target.value }))}
+                    className="w-full bg-slate-50 border border-slate-200/80 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#EE1D23] transition-all cursor-pointer shadow-2xs"
                   />
                 </div>
-                <span className="text-xs font-black text-[#10B981]">{metrics.resolvidoPct.toFixed(0)}%</span>
-              </div>
-            </div>
-            <div className="p-4 rounded-2xl shadow-lg bg-[#10B981] text-white group-hover:scale-105 transition-transform">
-              <CheckCircle2 className="w-7 h-7" />
-            </div>
-          </motion.div>
 
-          {/* TOTAL FECHADO */}
-          <motion.div 
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-white p-7 rounded-3xl shadow-md border border-slate-100 flex items-start justify-between relative overflow-hidden group hover:shadow-lg transition-all"
-          >
-            <div className="relative z-10">
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">Total Fechado</p>
-              <h4 className="text-4xl font-black text-[#3B82F6] tracking-tighter">{metrics.fechado.toLocaleString()}</h4>
-              <div className="mt-4 flex items-center gap-3">
-                <div className="w-24 h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-[#3B82F6] transition-all duration-700 ease-out"
-                    style={{ width: `${metrics.fechadoPct}%` }}
+                {/* FIM */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 ml-1">
+                    <Calendar className="w-3.5 h-3.5 text-[#EE1D23]" />
+                    Fim
+                  </label>
+                  <input 
+                    type="date" 
+                    value={filters.endDate}
+                    onChange={(e) => setFilters(f => ({ ...f, endDate: e.target.value }))}
+                    className="w-full bg-slate-50 border border-slate-200/80 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#EE1D23] transition-all cursor-pointer shadow-2xs"
                   />
                 </div>
-                <span className="text-xs font-black text-[#3B82F6]">{metrics.fechadoPct.toFixed(0)}%</span>
               </div>
             </div>
-            <div className="p-4 rounded-2xl shadow-lg bg-[#3B82F6] text-white group-hover:scale-105 transition-transform">
-              <FileCheck className="w-7 h-7" />
-            </div>
-          </motion.div>
+          </section>
 
-          {/* TOTAL CANCELADO */}
-          <motion.div 
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15 }}
-            className="bg-white p-7 rounded-3xl shadow-md border border-slate-100 flex items-start justify-between relative overflow-hidden group hover:shadow-lg transition-all"
-          >
-            <div className="relative z-10">
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">Total Cancelado</p>
-              <h4 className="text-4xl font-black text-slate-600 tracking-tighter">{metrics.cancelado.toLocaleString()}</h4>
-              <div className="mt-4 flex items-center gap-3">
-                <div className="w-24 h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-[#EE1D23]"
-                    style={{ width: `${metrics.canceladoPct}%` }}
-                  />
+          {/* Main KPI Cards Section - TODOS OS STATUS */}
+          <section className="max-w-7xl mx-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4">
+              {/* TOTAL DE EVENTOS */}
+              <motion.div 
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white p-5 rounded-3xl shadow-md border border-slate-100 flex items-start justify-between relative overflow-hidden group hover:shadow-lg transition-all"
+              >
+                <div className="relative z-10 flex-1 pr-2">
+                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1 truncate">Total de Eventos</p>
+                  <h4 className="text-3xl sm:text-4xl font-black text-[#1A1A1A] tracking-tighter">{metrics.total.toLocaleString()}</h4>
+                  <div className="mt-4 flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1 truncate">
+                      <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      {metrics.totalClientes.toLocaleString()} clientes
+                    </span>
+                  </div>
                 </div>
-                <span className="text-xs font-black text-[#EE1D23]">{metrics.canceladoPct.toFixed(0)}%</span>
-              </div>
+                <div className="p-3.5 rounded-2xl shadow-lg bg-[#1A1A1A] text-white group-hover:scale-105 transition-transform shrink-0">
+                  <Radio className="w-6 h-6" />
+                </div>
+              </motion.div>
+
+              {/* TOTAL RESOLVIDO */}
+              <motion.div 
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.04 }}
+                className="bg-white p-5 rounded-3xl shadow-md border border-slate-100 flex items-start justify-between relative overflow-hidden group hover:shadow-lg transition-all"
+              >
+                <div className="relative z-10 flex-1 pr-2">
+                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1 truncate">Total Resolvido</p>
+                  <h4 className="text-3xl sm:text-4xl font-black text-[#10B981] tracking-tighter">{metrics.resolvido.toLocaleString()}</h4>
+                  <div className="mt-4 flex items-center gap-2">
+                    <div className="flex-1 max-w-[80px] h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-[#10B981] transition-all duration-700 ease-out"
+                        style={{ width: `${metrics.resolvidoPct}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-black text-[#10B981]">{metrics.resolvidoPct.toFixed(0)}%</span>
+                  </div>
+                </div>
+                <div className="p-3.5 rounded-2xl shadow-lg bg-[#10B981] text-white group-hover:scale-105 transition-transform shrink-0">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+              </motion.div>
+
+              {/* TOTAL FECHADO */}
+              <motion.div 
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.08 }}
+                className="bg-white p-5 rounded-3xl shadow-md border border-slate-100 flex items-start justify-between relative overflow-hidden group hover:shadow-lg transition-all"
+              >
+                <div className="relative z-10 flex-1 pr-2">
+                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1 truncate">Total Fechado</p>
+                  <h4 className="text-3xl sm:text-4xl font-black text-[#2563EB] tracking-tighter">{metrics.fechado.toLocaleString()}</h4>
+                  <div className="mt-4 flex items-center gap-2">
+                    <div className="flex-1 max-w-[80px] h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-[#2563EB] transition-all duration-700 ease-out"
+                        style={{ width: `${metrics.fechadoPct}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-black text-[#2563EB]">{metrics.fechadoPct.toFixed(0)}%</span>
+                  </div>
+                </div>
+                <div className="p-3.5 rounded-2xl shadow-lg bg-[#2563EB] text-white group-hover:scale-105 transition-transform shrink-0">
+                  <FileCheck className="w-6 h-6" />
+                </div>
+              </motion.div>
+
+              {/* TOTAL CANCELADO */}
+              <motion.div 
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.12 }}
+                className="bg-white p-5 rounded-3xl shadow-md border border-slate-100 flex items-start justify-between relative overflow-hidden group hover:shadow-lg transition-all"
+              >
+                <div className="relative z-10 flex-1 pr-2">
+                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1 truncate">Total Cancelado</p>
+                  <h4 className="text-3xl sm:text-4xl font-black text-[#EE1D23] tracking-tighter">{metrics.cancelado.toLocaleString()}</h4>
+                  <div className="mt-4 flex items-center gap-2">
+                    <div className="flex-1 max-w-[80px] h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-[#EE1D23] transition-all duration-700 ease-out"
+                        style={{ width: `${metrics.canceladoPct}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-black text-[#EE1D23]">{metrics.canceladoPct.toFixed(0)}%</span>
+                  </div>
+                </div>
+                <div className="p-3.5 rounded-2xl shadow-lg bg-[#EE1D23] text-white group-hover:scale-105 transition-transform shrink-0">
+                  <XCircle className="w-6 h-6" />
+                </div>
+              </motion.div>
+
+              {/* TOTAL DESIGNADO */}
+              <motion.div 
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.16 }}
+                className="bg-white p-5 rounded-3xl shadow-md border border-slate-100 flex items-start justify-between relative overflow-hidden group hover:shadow-lg transition-all"
+              >
+                <div className="relative z-10 flex-1 pr-2">
+                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1 truncate">Total Designado</p>
+                  <h4 className="text-3xl sm:text-4xl font-black text-[#8B5CF6] tracking-tighter">{metrics.designado.toLocaleString()}</h4>
+                  <div className="mt-4 flex items-center gap-2">
+                    <div className="flex-1 max-w-[80px] h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-[#8B5CF6] transition-all duration-700 ease-out"
+                        style={{ width: `${metrics.designadoPct}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-black text-[#8B5CF6]">{metrics.designadoPct.toFixed(0)}%</span>
+                  </div>
+                </div>
+                <div className="p-3.5 rounded-2xl shadow-lg bg-[#8B5CF6] text-white group-hover:scale-105 transition-transform shrink-0">
+                  <UserCheck className="w-6 h-6" />
+                </div>
+              </motion.div>
+
+              {/* TOTAL PENDENTE */}
+              <motion.div 
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.20 }}
+                className="bg-white p-5 rounded-3xl shadow-md border border-slate-100 flex items-start justify-between relative overflow-hidden group hover:shadow-lg transition-all"
+              >
+                <div className="relative z-10 flex-1 pr-2">
+                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1 truncate">Total Pendente</p>
+                  <h4 className="text-3xl sm:text-4xl font-black text-[#F97316] tracking-tighter">{metrics.pendente.toLocaleString()}</h4>
+                  <div className="mt-4 flex items-center gap-2">
+                    <div className="flex-1 max-w-[80px] h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-[#F97316] transition-all duration-700 ease-out"
+                        style={{ width: `${metrics.pendentePct}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-black text-[#F97316]">{metrics.pendentePct.toFixed(0)}%</span>
+                  </div>
+                </div>
+                <div className="p-3.5 rounded-2xl shadow-lg bg-[#F97316] text-white group-hover:scale-105 transition-transform shrink-0">
+                  <Clock className="w-6 h-6" />
+                </div>
+              </motion.div>
+
+              {/* TOTAL EM PROGRESSO */}
+              <motion.div 
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.24 }}
+                className="bg-white p-5 rounded-3xl shadow-md border border-slate-100 flex items-start justify-between relative overflow-hidden group hover:shadow-lg transition-all"
+              >
+                <div className="relative z-10 flex-1 pr-2">
+                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1 truncate">Total Em Progresso</p>
+                  <h4 className="text-3xl sm:text-4xl font-black text-[#F59E0B] tracking-tighter">{metrics.emProgresso.toLocaleString()}</h4>
+                  <div className="mt-4 flex items-center gap-2">
+                    <div className="flex-1 max-w-[80px] h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-[#F59E0B] transition-all duration-700 ease-out"
+                        style={{ width: `${metrics.emProgressoPct}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-black text-[#F59E0B]">{metrics.emProgressoPct.toFixed(0)}%</span>
+                  </div>
+                </div>
+                <div className="p-3.5 rounded-2xl shadow-lg bg-[#F59E0B] text-white group-hover:scale-105 transition-transform shrink-0">
+                  <PlayCircle className="w-6 h-6" />
+                </div>
+              </motion.div>
             </div>
-            <div className="p-4 rounded-2xl shadow-lg bg-[#EE1D23] text-white group-hover:scale-105 transition-transform">
-              <XCircle className="w-7 h-7" />
-            </div>
-          </motion.div>
-        </div>
-      </section>
+          </section>
 
       {/* QUADRO 1: EVENTOS CONSOLIDADOS (EXATAMENTE NAS CORES DA CLARO) */}
       <section className="max-w-7xl mx-auto">
@@ -2592,10 +2822,12 @@ export default function OutageDashboard() {
                     return null;
                   }}
                 />
-                <Bar dataKey="Resolvido" name="Resolvido" stackId="statusStack" fill="#059669" />
-                <Bar dataKey="Fechado" name="Fechado" stackId="statusStack" fill="#2563EB" />
-                <Bar dataKey="Cancelado" name="Cancelado" stackId="statusStack" fill="#EE1D23" />
-                <Bar dataKey="Em Andamento" name="Em Andamento" stackId="statusStack" fill="#F59E0B" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="CANCELADO" name="CANCELADO" stackId="statusStack" fill="#EE1D23" />
+                <Bar dataKey="DESIGNADO" name="DESIGNADO" stackId="statusStack" fill="#8B5CF6" />
+                <Bar dataKey="EM PROGRESSO" name="EM PROGRESSO" stackId="statusStack" fill="#F59E0B" />
+                <Bar dataKey="FECHADO" name="FECHADO" stackId="statusStack" fill="#2563EB" />
+                <Bar dataKey="PENDENTE" name="PENDENTE" stackId="statusStack" fill="#F97316" />
+                <Bar dataKey="RESOLVIDO" name="RESOLVIDO" stackId="statusStack" fill="#059669" radius={[4, 4, 0, 0]} />
                 
                 {/* Linha transparente superior para ancorar e renderizar o VOLUME TOTAL acima de cada barra */}
                 <Line 
@@ -2823,6 +3055,8 @@ export default function OutageDashboard() {
           )}
         </div>
       </section>
+      </>
+      )}
 
       {/* Event Details Modal */}
       <AnimatePresence>

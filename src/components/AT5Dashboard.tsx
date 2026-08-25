@@ -159,63 +159,7 @@ const INITIAL_MOCK_AT5 = generateMockAT5Data();
 const COLORS_SERIES = ['#EE1D23', '#333333', '#475569', '#10B981', '#F59E0B', '#3B82F6', '#8B5CF6'];
 
 export default function AT5Dashboard() {
-  const [data, setData] = useState<AT5Row[]>(() => {
-    const saved = localStorage.getItem('AT5_DASHBOARD_DATA');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Check if dataset contains shifted dates from old offset bug (e.g. contains 13/08 or 12/08 without 01/08)
-          const has13August = parsed.some(r => r.data === '13/08');
-          const has12August = parsed.some(r => r.data === '12/08');
-          const has01August = parsed.some(r => r.data === '01/08');
-          const isShifted = (has13August || has12August) && !has01August;
-
-          const shiftDateMinusTwo = (dtStr: string): string => {
-            const parts = dtStr.split('/');
-            if (parts.length !== 2) return dtStr;
-            const d = parseInt(parts[0], 10);
-            const m = parseInt(parts[1], 10) - 1;
-            if (isNaN(d) || isNaN(m)) return dtStr;
-            
-            const dateObj = new Date(2026, m, d);
-            dateObj.setDate(dateObj.getDate() - 2);
-            
-            const newDay = String(dateObj.getDate()).padStart(2, '0');
-            const newMonth = String(dateObj.getMonth() + 1).padStart(2, '0');
-            return `${newDay}/${newMonth}`;
-          };
-
-          // Dynamic backward-compatibility enrichment: convert empty or legacy "CTR-" contracts to clean numeric IDs
-          const mappedRows = parsed.map((row, idx) => {
-            const hasInvalidContract = !row.contrato || row.contrato === 'N/A' || row.contrato === 'null' || row.contrato === '' || String(row.contrato).startsWith('CTR-');
-            const contractVal = hasInvalidContract
-              ? generateNumericContract(row.municipio || 'MANAUS', row.empresa || 'TELEMONT', idx)
-              : String(row.contrato).trim();
-            
-            let dateVal = row.data && row.data !== 'N/A' && row.data !== ''
-              ? row.data
-              : `${String((idx % 11) + 1).padStart(2, '0')}/08`;
-
-            if (isShifted) {
-              dateVal = shiftDateMinusTwo(dateVal);
-            }
-
-            return {
-              ...row,
-              contrato: contractVal,
-              data: dateVal
-            };
-          });
-
-          return mappedRows;
-        }
-      } catch (e) {
-        return INITIAL_MOCK_AT5;
-      }
-    }
-    return INITIAL_MOCK_AT5;
-  });
+  const [data, setData] = useState<AT5Row[]>([]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -272,13 +216,14 @@ export default function AT5Dashboard() {
     padraoOs: useRef<HTMLDivElement>(null)
   };
 
+  // Clear any legacy localStorage data on mount to ensure fresh state
   useEffect(() => {
     try {
-      localStorage.setItem('AT5_DASHBOARD_DATA', JSON.stringify(data));
+      localStorage.removeItem('AT5_DASHBOARD_DATA');
     } catch (err) {
-      console.warn('[AT5Dashboard] Storage quota exceeded or disabled, skipping localStorage save:', err);
+      // ignore
     }
-  }, [data]);
+  }, []);
 
   // Click outside dropdown handler
   useEffect(() => {
@@ -1178,12 +1123,39 @@ export default function AT5Dashboard() {
       )}
 
       {data.length === 0 ? (
-        <div className="bg-slate-50 rounded-[40px] border border-slate-200/60 p-16 text-center text-slate-400 font-bold uppercase tracking-wider h-72 flex flex-col items-center justify-center">
-          <FileSpreadsheet className="w-12 h-12 text-slate-300 mb-4 animate-pulse" />
-          <p className="text-sm">Nenhum dado AT5 carregado.</p>
-          <p className="text-xs text-slate-400 mt-2 lowercase text-center max-w-sm font-medium">
-            insira os registros carregando a planilha "at5 norte" do google drive ou clique em "exemplos at5" para demonstração.
+        <div className="bg-white rounded-[32px] border border-slate-200/80 shadow-sm p-12 text-center flex flex-col items-center justify-center my-6">
+          <div className="w-14 h-14 bg-red-50 rounded-2xl flex items-center justify-center mb-4">
+            <FileSpreadsheet className="w-7 h-7 text-[#EE1D23]" />
+          </div>
+          <h3 className="text-xl font-black text-slate-800 uppercase italic tracking-tight mb-2">
+            Nenhum Dado AT5 Carregado
+          </h3>
+          <p className="text-xs text-slate-400 max-w-md mb-6 leading-relaxed font-bold uppercase tracking-wider">
+            Sincronize com o GitHub ou importe a planilha Excel (AT5_NORTE.xlsx) para visualizar os indicadores e notas de executabilidade.
           </p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              onClick={() => {
+                const preConfiguredUrl = (import.meta as any).env?.VITE_GITHUB_EXCEL_URL_AT5 || (import.meta as any).env?.VITE_GITHUB_EXCEL_URL;
+                if (preConfiguredUrl) {
+                  loadFromGithub(preConfiguredUrl);
+                } else {
+                  setShowGithubInput(true);
+                }
+              }}
+              className="flex items-center gap-2 bg-[#EE1D23] hover:bg-red-600 text-white font-black py-2.5 px-5 rounded-xl transition-all shadow-md shadow-red-500/15 active:scale-95 uppercase italic text-xs cursor-pointer"
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Sincronizar GitHub</span>
+            </button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-800 font-black py-2.5 px-5 rounded-xl border border-slate-200 transition-all shadow-2xs active:scale-95 uppercase italic text-xs cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5 text-[#EE1D23]" />
+              <span>Importar Excel</span>
+            </button>
+          </div>
         </div>
       ) : (
         <>

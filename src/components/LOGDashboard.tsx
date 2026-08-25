@@ -124,20 +124,7 @@ const generateInitialMockLOGData = (): LOGRow[] => {
 };
 
 export default function LOGDashboard() {
-  const [data, setData] = useState<LOGRow[]>(() => {
-    try {
-      const saved = localStorage.getItem('LOG_DASHBOARD_DATA');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return generateInitialMockLOGData();
-  });
+  const [data, setData] = useState<LOGRow[]>([]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -189,16 +176,14 @@ export default function LOGDashboard() {
     handleClearFilters();
   };
 
-  // Save to localStorage safely
+  // Clear legacy localStorage data on mount to ensure fresh state
   useEffect(() => {
-    if (data.length > 0) {
-      try {
-        localStorage.setItem('LOG_DASHBOARD_DATA', JSON.stringify(data));
-      } catch (err) {
-        console.warn('[LOGDashboard] Storage quota exceeded or disabled, skipping localStorage save:', err);
-      }
+    try {
+      localStorage.removeItem('LOG_DASHBOARD_DATA');
+    } catch (err) {
+      // ignore
     }
-  }, [data]);
+  }, []);
 
   // 5 Primary Filters State
   const [filters, setFilters] = useState<{
@@ -880,6 +865,43 @@ export default function LOGDashboard() {
         </div>
       )}
 
+      {data.length === 0 ? (
+        <div className="bg-white rounded-[32px] border border-slate-200/80 shadow-sm p-12 text-center flex flex-col items-center justify-center my-6">
+          <div className="w-14 h-14 bg-red-50 rounded-2xl flex items-center justify-center mb-4">
+            <FileSpreadsheet className="w-7 h-7 text-[#EE1D23]" />
+          </div>
+          <h3 className="text-xl font-black text-slate-800 uppercase italic tracking-tight mb-2">
+            Nenhum Dado LOG Carregado
+          </h3>
+          <p className="text-xs text-slate-400 max-w-md mb-6 leading-relaxed font-bold uppercase tracking-wider">
+            Sincronize com o GitHub ou importe a planilha Excel (BASE_LOG.xlsx) para visualizar as métricas de qualidade e log de chamados.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              onClick={() => {
+                const preConfiguredUrl = (import.meta as any).env?.VITE_GITHUB_EXCEL_URL_LOG || (import.meta as any).env?.VITE_GITHUB_EXCEL_URL;
+                if (preConfiguredUrl) {
+                  handleGithubLoad(preConfiguredUrl);
+                } else {
+                  setShowGithubInput(true);
+                }
+              }}
+              className="flex items-center gap-2 bg-[#EE1D23] hover:bg-red-600 text-white font-black py-2.5 px-5 rounded-xl transition-all shadow-md shadow-red-500/15 active:scale-95 uppercase italic text-xs cursor-pointer"
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Sincronizar GitHub</span>
+            </button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-800 font-black py-2.5 px-5 rounded-xl border border-slate-200 transition-all shadow-2xs active:scale-95 uppercase italic text-xs cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5 text-[#EE1D23]" />
+              <span>Importar Excel</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* 4 Core Filters Panel */}
       <div className="bg-white rounded-[32px] p-6 border border-slate-200/80 shadow-xs">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 pb-4 border-b border-slate-100">
@@ -1553,6 +1575,8 @@ export default function LOGDashboard() {
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
