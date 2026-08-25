@@ -2239,10 +2239,9 @@ export default function App() {
 
         {/* Main Content Area */}
         <div className="flex-1 min-w-0 p-3 sm:p-5 lg:p-6 overflow-y-auto">
-          {activeTab === 'dashboard' ? (
-            <>
-              {/* Header */}
-              <header className="max-w-7xl mx-auto mb-8">
+          <div className={activeTab === 'dashboard' ? 'block' : 'hidden'}>
+            {/* Header */}
+            <header className="max-w-7xl mx-auto mb-8">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                   <div className="flex items-center gap-4">
                     <div className="w-14 h-14 bg-[#EE1D23] rounded-2xl flex items-center justify-center shadow-xl shadow-red-500/20 relative overflow-hidden group">
@@ -3582,24 +3581,33 @@ export default function App() {
         </main>
             </>
           )}
-        </>
-      ) : activeTab === 'outage' ? (
-        <OutageDashboard />
-      ) : activeTab === 'at5' ? (
-        <AT5Dashboard />
-      ) : activeTab === 'log' ? (
-        <LOGDashboard />
-      ) : activeTab === 'revisita30d' ? (
-        <Revisita30DDashboard />
-      ) : (
-        <Logbook 
-          entries={logEntries} 
-          isLoading={isLogLoading} 
-          error={logFetchError}
-          onRefresh={fetchLogs} 
-          cities={filterOptions.cidades}
-        />
-      )}
+          </div>
+
+          <div className={activeTab === 'outage' ? 'block' : 'hidden'}>
+            <OutageDashboard />
+          </div>
+
+          <div className={activeTab === 'at5' ? 'block' : 'hidden'}>
+            <AT5Dashboard />
+          </div>
+
+          <div className={activeTab === 'log' ? 'block' : 'hidden'}>
+            <LOGDashboard />
+          </div>
+
+          <div className={activeTab === 'revisita30d' ? 'block' : 'hidden'}>
+            <Revisita30DDashboard />
+          </div>
+
+          <div className={activeTab === 'logbook' ? 'block' : 'hidden'}>
+            <Logbook 
+              entries={logEntries} 
+              isLoading={isLogLoading} 
+              error={logFetchError}
+              onRefresh={fetchLogs} 
+              cities={filterOptions.cidades}
+            />
+          </div>
         </div>
         
         <AnimatePresence>
