@@ -449,7 +449,15 @@ const generateExactReferenceOutageData = (): OutageEvent[] => {
   return list;
 };
 
-export default function OutageDashboard() {
+export interface OutageDashboardProps {
+  at1DailyVolume?: Array<{ name: string; value: number | null; previousValue: number }>;
+  at1ComparisonMonths?: { current: string; previous: string };
+}
+
+export default function OutageDashboard({
+  at1DailyVolume = [],
+  at1ComparisonMonths = { current: 'Atual', previous: 'Anterior' }
+}: OutageDashboardProps = {}) {
   const [data, setData] = useState<OutageEvent[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
@@ -2729,145 +2737,292 @@ export default function OutageDashboard() {
 
       {/* Charts Section: Evolução Diária & Status */}
       <section className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Chart 1: Volume Diário de Outage (8 cols) */}
-        <div className="lg:col-span-8 bg-white p-6 sm:p-8 rounded-3xl shadow-md border border-slate-100 flex flex-col">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded-full bg-[#EE1D23] text-white text-[10px] font-black uppercase tracking-wider">
-                  Volume Diário
-                </span>
-                <h3 className="text-lg font-black text-slate-900 uppercase italic tracking-tight">
-                  Evolução Diária de Eventos (Outage)
-                </h3>
+        {/* Left Column (8 cols): Evolução Diária de Eventos (Outage) + Volume Diário (AT1) */}
+        <div className="lg:col-span-8 flex flex-col gap-8">
+          {/* Chart 1: Volume Diário de Outage */}
+          <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-md border border-slate-100 flex flex-col">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full bg-[#EE1D23] text-white text-[10px] font-black uppercase tracking-wider">
+                    Volume Diário
+                  </span>
+                  <h3 className="text-lg font-black text-slate-900 uppercase italic tracking-tight">
+                    Evolução Diária de Eventos (Outage)
+                  </h3>
+                </div>
+                <p className="text-xs font-bold text-slate-400 mt-0.5">
+                  Distribuição temporal com contagem diária de ocorrências por data de início
+                </p>
               </div>
-              <p className="text-xs font-bold text-slate-400 mt-0.5">
-                Distribuição temporal com contagem diária de ocorrências por data de início
-              </p>
-            </div>
-            
-            {/* Legenda Customizada com Cores Oficiais e Contadores */}
-            <div className="flex flex-wrap items-center gap-3 text-xs font-bold bg-slate-50 px-3.5 py-2 rounded-2xl border border-slate-100">
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-md bg-[#059669] shadow-2xs" />
-                <span className="text-slate-700">Resolvido</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-md bg-[#2563EB] shadow-2xs" />
-                <span className="text-slate-700">Fechado</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-md bg-[#EE1D23] shadow-2xs" />
-                <span className="text-slate-700">Cancelado</span>
-              </div>
-              {metrics.emAndamento > 0 && (
+              
+              {/* Legenda Customizada com Cores Oficiais e Todos os Status */}
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs font-bold bg-slate-50 px-3.5 py-2 rounded-2xl border border-slate-100">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-md bg-[#059669] shadow-2xs" />
+                  <span className="text-slate-700">Resolvido</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-md bg-[#2563EB] shadow-2xs" />
+                  <span className="text-slate-700">Fechado</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-md bg-[#EE1D23] shadow-2xs" />
+                  <span className="text-slate-700">Cancelado</span>
+                </div>
                 <div className="flex items-center gap-1.5">
                   <span className="w-3 h-3 rounded-md bg-[#F59E0B] shadow-2xs" />
-                  <span className="text-slate-700">Em Andamento</span>
+                  <span className="text-slate-700">Em Progresso</span>
                 </div>
-              )}
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-md bg-[#8B5CF6] shadow-2xs" />
+                  <span className="text-slate-700">Designado</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-md bg-[#F97316] shadow-2xs" />
+                  <span className="text-slate-700">Pendente</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="h-96 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart 
+                  data={dailyChartData} 
+                  margin={{ top: 28, right: 15, left: -15, bottom: dailyChartData.length > 12 ? 35 : 20 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                  <XAxis 
+                    dataKey="displayDate" 
+                    tick={{ fontSize: dailyChartData.length > 20 ? 9 : 10, fontWeight: 800, fill: '#334155' }} 
+                    axisLine={{ stroke: '#CBD5E1' }}
+                    tickLine={false}
+                    interval={0}
+                    angle={dailyChartData.length > 12 ? -45 : 0}
+                    textAnchor={dailyChartData.length > 12 ? 'end' : 'middle'}
+                    height={dailyChartData.length > 12 ? 45 : 30}
+                  />
+                  <YAxis 
+                    tick={{ fontSize: 11, fontWeight: 700, fill: '#64748B' }} 
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip 
+                    content={({ active, payload, label }) => {
+                      if (active && payload && payload.length) {
+                        const totalDay = payload[0]?.payload?.Total || 0;
+                        return (
+                          <div className="bg-slate-900 text-white p-3.5 rounded-2xl shadow-xl text-xs space-y-2 border border-slate-800 min-w-[200px]">
+                            <div className="border-b border-slate-700 pb-2">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-red-400 block">Data de Início</span>
+                              <h5 className="font-black text-white text-sm">{label}</h5>
+                              <div className="mt-1 flex items-center justify-between text-xs font-black bg-slate-800/80 px-2 py-1 rounded-lg">
+                                <span className="text-slate-300">Volume Total:</span>
+                                <span className="text-white font-mono text-sm">{totalDay.toLocaleString()}</span>
+                              </div>
+                            </div>
+                            <div className="space-y-1 pt-0.5">
+                              {payload.filter((entry: any) => entry.dataKey !== 'Total' && entry.value > 0).map((entry: any) => (
+                                <div key={entry.name} className="flex justify-between items-center text-xs">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-2.5 h-2.5 rounded-xs" style={{ backgroundColor: entry.color }} />
+                                    <span className="font-medium text-slate-200">{entry.name}:</span>
+                                  </div>
+                                  <span className="font-mono font-black text-white">{entry.value.toLocaleString()}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Bar dataKey="CANCELADO" name="CANCELADO" stackId="statusStack" fill="#EE1D23" />
+                  <Bar dataKey="DESIGNADO" name="DESIGNADO" stackId="statusStack" fill="#8B5CF6" />
+                  <Bar dataKey="EM PROGRESSO" name="EM PROGRESSO" stackId="statusStack" fill="#F59E0B" />
+                  <Bar dataKey="FECHADO" name="FECHADO" stackId="statusStack" fill="#2563EB" />
+                  <Bar dataKey="PENDENTE" name="PENDENTE" stackId="statusStack" fill="#F97316" />
+                  <Bar dataKey="RESOLVIDO" name="RESOLVIDO" stackId="statusStack" fill="#059669" radius={[4, 4, 0, 0]} />
+                  
+                  {/* Linha transparente superior para ancorar e renderizar o VOLUME TOTAL acima de cada barra */}
+                  <Line 
+                    type="monotone" 
+                    dataKey="Total" 
+                    stroke="transparent" 
+                    dot={false}
+                    activeDot={false}
+                    isAnimationActive={false}
+                  >
+                    <LabelList 
+                      dataKey="Total" 
+                      position="top" 
+                      offset={6}
+                      content={(props: any) => {
+                        const { x, y, value } = props;
+                        if (!value || value <= 0) return null;
+                        return (
+                          <text 
+                            x={x} 
+                            y={y - 4} 
+                            fill="#1E293B" 
+                            textAnchor="middle" 
+                            fontSize={10} 
+                            fontWeight="800"
+                            fontFamily="monospace"
+                          >
+                            {value}
+                          </text>
+                        );
+                      }}
+                    />
+                  </Line>
+                </ComposedChart>
+              </ResponsiveContainer>
             </div>
           </div>
 
-          <div className="h-96 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart 
-                data={dailyChartData} 
-                margin={{ top: 28, right: 15, left: -15, bottom: dailyChartData.length > 12 ? 35 : 20 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                <XAxis 
-                  dataKey="displayDate" 
-                  tick={{ fontSize: dailyChartData.length > 20 ? 9 : 10, fontWeight: 800, fill: '#334155' }} 
-                  axisLine={{ stroke: '#CBD5E1' }}
-                  tickLine={false}
-                  interval={0}
-                  angle={dailyChartData.length > 12 ? -45 : 0}
-                  textAnchor={dailyChartData.length > 12 ? 'end' : 'middle'}
-                  height={dailyChartData.length > 12 ? 45 : 30}
-                />
-                <YAxis 
-                  tick={{ fontSize: 11, fontWeight: 700, fill: '#64748B' }} 
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip 
-                  content={({ active, payload, label }) => {
-                    if (active && payload && payload.length) {
-                      const totalDay = payload[0]?.payload?.Total || 0;
-                      return (
-                        <div className="bg-slate-900 text-white p-3.5 rounded-2xl shadow-xl text-xs space-y-2 border border-slate-800 min-w-[200px]">
-                          <div className="border-b border-slate-700 pb-2">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-red-400 block">Data de Início</span>
-                            <h5 className="font-black text-white text-sm">{label}</h5>
-                            <div className="mt-1 flex items-center justify-between text-xs font-black bg-slate-800/80 px-2 py-1 rounded-lg">
-                              <span className="text-slate-300">Volume Total:</span>
-                              <span className="text-white font-mono text-sm">{totalDay.toLocaleString()}</span>
+          {/* Chart 2: Volume Diário (Comparativo de Visitas por Dia - Baseado nos Filtros da Aba AT1) */}
+          <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-md border border-slate-100 flex flex-col">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center">
+                  <Activity className="w-5 h-5 text-[#EE1D23]" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tighter">Volume Diário</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Comparativo de visitas por dia</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-6">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-slate-300"></div>
+                  <span className="text-[10px] text-slate-500 font-black uppercase tracking-tighter">{at1ComparisonMonths.previous || 'Anterior'}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-[#EE1D23]"></div>
+                  <span className="text-[10px] text-slate-500 font-black uppercase tracking-tighter">{at1ComparisonMonths.current || 'Atual'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="h-[280px] w-full min-h-[280px]">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                <ComposedChart data={at1DailyVolume} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="outageAt1ColorValue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#EE1D23" stopOpacity={0.1}/>
+                      <stop offset="95%" stopColor="#EE1D23" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis 
+                    dataKey="name" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }}
+                    interval="preserveStartEnd"
+                    minTickGap={10}
+                  />
+                  <YAxis 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }}
+                  />
+                  <Tooltip 
+                    cursor={{ stroke: '#cbd5e1', strokeWidth: 2, strokeDasharray: '5 5' }}
+                    content={({ active, payload, label }) => {
+                      if (active && payload && payload.length) {
+                        return (
+                          <div className="bg-white p-4 rounded-2xl shadow-xl border border-slate-50 min-w-[140px]">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 border-b border-slate-50 pb-1">Dia {label}</p>
+                            <div className="space-y-2">
+                              {payload.map((entry: any, index: number) => {
+                                if (entry.dataKey === 'areaValue') return null;
+                                return (
+                                  <div key={index} className="flex items-center justify-between gap-4">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.stroke || entry.fill }} />
+                                      <span className="text-[11px] font-bold text-slate-600">{entry.name}</span>
+                                    </div>
+                                    <span className="text-xs font-black" style={{ color: entry.stroke || entry.fill }}>{entry.value?.toLocaleString()}</span>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
-                          <div className="space-y-1 pt-0.5">
-                            {payload.filter((entry: any) => entry.dataKey !== 'Total' && entry.value > 0).map((entry: any) => (
-                              <div key={entry.name} className="flex justify-between items-center text-xs">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="w-2.5 h-2.5 rounded-xs" style={{ backgroundColor: entry.color }} />
-                                  <span className="font-medium text-slate-200">{entry.name}:</span>
-                                </div>
-                                <span className="font-mono font-black text-white">{entry.value.toLocaleString()}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <Bar dataKey="CANCELADO" name="CANCELADO" stackId="statusStack" fill="#EE1D23" />
-                <Bar dataKey="DESIGNADO" name="DESIGNADO" stackId="statusStack" fill="#8B5CF6" />
-                <Bar dataKey="EM PROGRESSO" name="EM PROGRESSO" stackId="statusStack" fill="#F59E0B" />
-                <Bar dataKey="FECHADO" name="FECHADO" stackId="statusStack" fill="#2563EB" />
-                <Bar dataKey="PENDENTE" name="PENDENTE" stackId="statusStack" fill="#F97316" />
-                <Bar dataKey="RESOLVIDO" name="RESOLVIDO" stackId="statusStack" fill="#059669" radius={[4, 4, 0, 0]} />
-                
-                {/* Linha transparente superior para ancorar e renderizar o VOLUME TOTAL acima de cada barra */}
-                <Line 
-                  type="monotone" 
-                  dataKey="Total" 
-                  stroke="transparent" 
-                  dot={false}
-                  activeDot={false}
-                  isAnimationActive={false}
-                >
-                  <LabelList 
-                    dataKey="Total" 
-                    position="top" 
-                    offset={6}
-                    content={(props: any) => {
-                      const { x, y, value } = props;
-                      if (!value || value <= 0) return null;
-                      return (
-                        <text 
-                          x={x} 
-                          y={y - 4} 
-                          fill="#1E293B" 
-                          textAnchor="middle" 
-                          fontSize={10} 
-                          fontWeight="800"
-                          fontFamily="monospace"
-                        >
-                          {value}
-                        </text>
-                      );
+                        );
+                      }
+                      return null;
                     }}
                   />
-                </Line>
-              </ComposedChart>
-            </ResponsiveContainer>
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke="none"
+                    fill="url(#outageAt1ColorValue)"
+                    fillOpacity={1}
+                    connectNulls
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="previousValue" 
+                    name={at1ComparisonMonths.previous || 'Mês Anterior'} 
+                    stroke="#cbd5e1" 
+                    strokeWidth={3} 
+                    dot={{ r: 0 }}
+                    activeDot={{ r: 4 }}
+                    connectNulls
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="value" 
+                    name={at1ComparisonMonths.current || 'Mês Atual'} 
+                    stroke="#EE1D23" 
+                    strokeWidth={4} 
+                    dot={{ r: 3, fill: '#EE1D23', strokeWidth: 2, stroke: '#fff' }}
+                    activeDot={{ r: 6, strokeWidth: 0 }}
+                    connectNulls
+                  >
+                    <LabelList 
+                      dataKey="value" 
+                      position="top" 
+                      content={(props: any) => {
+                        const { x, y, value, index } = props;
+                        if (value === null || value === undefined || value === 0) return null;
+                        
+                        const isLast = index === at1DailyVolume.length - 1;
+                        const prevVal = (index > 0 && at1DailyVolume[index - 1]) ? at1DailyVolume[index - 1].value : null;
+                        const nextVal = (index < at1DailyVolume.length - 1 && at1DailyVolume[index + 1]) ? at1DailyVolume[index + 1].value : null;
+                        
+                        const isPeak = (prevVal === null || value > prevVal) && (nextVal === null || value > nextVal);
+                        const isStep = index % 4 === 0;
+
+                        if (!isPeak && !isLast && !isStep) return null;
+
+                        return (
+                          <text 
+                            x={x} 
+                            y={y - 12} 
+                            fill="#EE1D23" 
+                            fontSize={10} 
+                            fontWeight={900} 
+                            textAnchor="middle"
+                          >
+                            {value}
+                          </text>
+                        );
+                      }}
+                    />
+                  </Line>
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
 
-        {/* Chart 2: Status Breakdown Pie Chart (4 cols) */}
-        <div className="lg:col-span-4 bg-white p-6 sm:p-8 rounded-3xl shadow-md border border-slate-100 flex flex-col justify-between">
+        {/* Chart 3: Status Breakdown Pie Chart (4 cols) */}
+        <div className="lg:col-span-4 bg-white p-6 sm:p-8 rounded-3xl shadow-md border border-slate-100 flex flex-col justify-between self-start">
           <div>
             <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tight mb-1">
               Status dos Eventos

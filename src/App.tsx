@@ -3584,7 +3584,10 @@ export default function App() {
           </div>
 
           <div className={activeTab === 'outage' ? 'block' : 'hidden'}>
-            <OutageDashboard />
+            <OutageDashboard 
+              at1DailyVolume={dailyVolume}
+              at1ComparisonMonths={comparisonMonths}
+            />
           </div>
 
           <div className={activeTab === 'at5' ? 'block' : 'hidden'}>
