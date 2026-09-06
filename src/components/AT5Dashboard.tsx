@@ -62,7 +62,9 @@ export interface AT5Row {
   codigoBaixa: string;
   node: string;
   contrato: string;
-  data: string;
+  data: string; // Data da Nota (ex: '01/09')
+  dataNota?: string; // Data da Nota (ex: '01/09')
+  dataNotaFull?: string; // Data da Nota completa (ex: '01/09/2026 00:00:00')
   aberturaSolic?: string;
   dataIso?: string;
 }
@@ -363,24 +365,19 @@ export default function AT5Dashboard({
       }
 
       // Determine a dynamic fallback month/period from the actual data if possible
-      let fallbackMonth = '05'; // Default to May
+      let fallbackMonth = '09'; // Default to current month September if not detected
       
-      // Let's scan rawRows to detect a valid month in the actual uploaded spreadsheet
+      // First, scan rawRows prioritizing DT_NOTA (Data da Nota)
       for (const row of rawRows) {
         if (!row) continue;
         const rowKeys = Object.keys(row);
-        const exactDateKeys = [
-          'DT_BAIXA', 'DATA_BAIXA', 'DT_NOTA', 'DT_NOTA_AT5', 'DATA_NOTA', 'DT NOTA', 'DATA NOTA',
-          'DATA', 'DT_FECHAMENTO', 'DATA_FECHAMENTO', 'FECHAMENTO', 
-          'DATA_EXECUCAO', 'DT_EXECUCAO', 'DT_FECHAMENTO', 'DATA OS', 'DT_OS', 
-          'DT_ABERTURA', 'DATA_ABERTURA', 'DATA_CADASTRO', 'DT_CADASTRO',
-          'DT_FIM_EXEC', 'DT_FIM_EXECUCAO', 'DT_FIM_EXECUÇÃO', 'DT_FIM', 'DATA_FIM',
-          'DT_ENCERRAMENTO', 'DATA_ENCERRAMENTO', 'DT_CONCLUSAO', 'DATA_CONCLUSAO',
-          'DT_EXEC', 'DT_EXECUCAO', 'DT_EXECUÇÃO', 'DT_RES_CHAMADO', 'DATA_FIM_OS', 'DT_FIM_OS'
+        const notaKeys = [
+          'DT_NOTA', 'DATA_NOTA', 'DT NOTA', 'DATA NOTA', 'DT_NOTA_AT5', 'DATA_NOTA_AT5',
+          'DT_BAIXA', 'DATA_BAIXA', 'DT_EXECUCAO', 'DATA_EXECUCAO', 'DT_FECHAMENTO'
         ];
         
         let foundVal: any = null;
-        for (const k of exactDateKeys) {
+        for (const k of notaKeys) {
           const foundKey = rowKeys.find(rk => rk.toUpperCase().trim() === k.toUpperCase().trim());
           if (foundKey !== undefined && row[foundKey] !== null && row[foundKey] !== undefined && String(row[foundKey]).trim() !== '') {
             foundVal = row[foundKey];
@@ -391,19 +388,25 @@ export default function AT5Dashboard({
         if (!foundVal) {
           const foundKey = rowKeys.find(rk => {
             const upper = rk.toUpperCase().trim();
-            return (
-              upper.includes('DT_') || 
-              (upper.includes('DATA') && !upper.includes('NASC')) || 
-              upper.includes('FECHAMENTO') || 
-              upper.includes('EXECU') || 
-              upper.includes('CONCLU') || 
-              upper.includes('ENCERRA') || 
-              upper.includes('BAIXA') ||
-              upper.includes('FIM')
-            );
+            return upper.includes('DT_NOTA') || upper.includes('DATA_NOTA') || (upper.includes('NOTA') && (upper.includes('DT') || upper.includes('DATA')));
           });
           if (foundKey !== undefined && row[foundKey] !== null && row[foundKey] !== undefined && String(row[foundKey]).trim() !== '') {
             foundVal = row[foundKey];
+          }
+        }
+
+        // Secondary fallback to other date columns if no nota found yet
+        if (!foundVal) {
+          const secondaryDateKeys = [
+            'ABERTURA_SOLIC', 'DT_ABERTURA', 'DATA_ABERTURA', 'ABERTURA',
+            'DATA', 'FECHAMENTO', 'DATA OS', 'DT_OS', 'DATA_CADASTRO'
+          ];
+          for (const k of secondaryDateKeys) {
+            const foundKey = rowKeys.find(rk => rk.toUpperCase().trim() === k.toUpperCase().trim());
+            if (foundKey !== undefined && row[foundKey] !== null && row[foundKey] !== undefined && String(row[foundKey]).trim() !== '') {
+              foundVal = row[foundKey];
+              break;
+            }
           }
         }
         
@@ -416,7 +419,7 @@ export default function AT5Dashboard({
             }
           }
           const numVal = Number(foundVal);
-          if (!isNaN(numVal) && numVal > 40000 && numVal < 50000) {
+          if (!isNaN(numVal) && numVal > 40000 && numVal < 60000) {
             const dateObj = new Date((numVal - 25569) * 86400 * 1000 + 12 * 60 * 60 * 1000);
             if (!isNaN(dateObj.getTime())) {
               const m = dateObj.getUTCMonth() + 1;
@@ -504,21 +507,48 @@ export default function AT5Dashboard({
 
         const rawContrato = getContratoValue();
 
-        // Date Parser with super robust detection including ABERTURA_SOLIC
-        const exactDateKeys = [
+        // Date Parser with explicit prioritization of DT_NOTA (Data da Nota)
+        // Per requirement: "para esse gráfico utilize a data da nota do arquivo, nesse caso o arquivo só tem a nota do dia 01/09/26"
+        const exactNotaKeys = [
+          'DT_NOTA', 'DATA_NOTA', 'DT NOTA', 'DATA NOTA', 'DT_NOTA_AT5', 'DATA_NOTA_AT5',
+          'DT_BAIXA', 'DATA_BAIXA', 'DT BAIXA', 'DATA BAIXA',
+          'DT_EXECUCAO', 'DATA_EXECUCAO', 'DT_EXECUÇÃO', 'DATA_EXECUÇÃO', 'DT_EXEC', 'DATA_EXEC',
+          'DT_FECHAMENTO', 'DATA_FECHAMENTO', 'FECHAMENTO', 
+          'DT_CONCLUSAO', 'DATA_CONCLUSAO', 'DT_ENCERRAMENTO', 'DATA_ENCERRAMENTO'
+        ];
+
+        let rawNotaVal = getValueIgnoreCase(exactNotaKeys);
+        if (rawNotaVal === null || rawNotaVal === undefined || String(rawNotaVal).trim() === '') {
+          const rowKeys = Object.keys(row);
+          const foundKey = rowKeys.find(rk => {
+            const u = rk.toUpperCase().trim();
+            return (
+              u.includes('DT_NOTA') || 
+              u.includes('DATA_NOTA') || 
+              u.includes('DT NOTA') || 
+              u.includes('DATA NOTA') ||
+              (u.includes('NOTA') && (u.includes('DT') || u.includes('DATA')))
+            );
+          });
+          if (foundKey && row[foundKey] !== null && row[foundKey] !== undefined && String(row[foundKey]).trim() !== '') {
+            rawNotaVal = row[foundKey];
+          }
+        }
+
+        const rawAberturaVal = getValueIgnoreCase([
           'ABERTURA_SOLIC', 'DT_ABERTURA_SOLIC', 'ABERTURA SOLIC', 'DT_ABERTURA', 'DATA_ABERTURA', 'ABERTURA',
-          'DT_BAIXA', 'DATA_BAIXA', 'DT_NOTA', 'DT_NOTA_AT5', 'DATA_NOTA', 'DT NOTA', 'DATA NOTA',
-          'DATA', 'DT_FECHAMENTO', 'DATA_FECHAMENTO', 'FECHAMENTO', 
+          'DATA_CADASTRO', 'DT_CADASTRO'
+        ]);
+
+        const exactDateKeys = [
+          'DT_NOTA', 'DATA_NOTA', 'DT NOTA', 'DATA NOTA', 'DT_NOTA_AT5',
+          'DT_BAIXA', 'DATA_BAIXA', 'DATA', 'DT_FECHAMENTO', 'DATA_FECHAMENTO', 'FECHAMENTO', 
           'DATA_EXECUCAO', 'DT_EXECUCAO', 'DATA OS', 'DT_OS', 
-          'DATA_CADASTRO', 'DT_CADASTRO',
+          'ABERTURA_SOLIC', 'DT_ABERTURA_SOLIC', 'DT_ABERTURA', 'DATA_ABERTURA', 'ABERTURA',
           'DT_FIM_EXEC', 'DT_FIM_EXECUCAO', 'DT_FIM_EXECUÇÃO', 'DT_FIM', 'DATA_FIM',
           'DT_ENCERRAMENTO', 'DATA_ENCERRAMENTO', 'DT_CONCLUSAO', 'DATA_CONCLUSAO',
           'DT_EXEC', 'DT_RES_CHAMADO', 'DATA_FIM_OS', 'DT_FIM_OS'
         ];
-
-        const rawAberturaVal = getValueIgnoreCase([
-          'ABERTURA_SOLIC', 'DT_ABERTURA_SOLIC', 'ABERTURA SOLIC', 'DT_ABERTURA', 'DATA_ABERTURA', 'ABERTURA'
-        ]);
 
         const getRawDateValue = () => {
           const valExact = getValueIgnoreCase(exactDateKeys);
@@ -531,8 +561,8 @@ export default function AT5Dashboard({
           
           // 1st loose level: containing specific keywords
           const firstLevelKeywords = [
-            'ABERTURA', 'DT_BAIXA', 'DATA_BAIXA', 'DT_NOTA', 'DATA_NOTA', 'FECHAMENTO', 'EXECUCAO', 'EXECUÇÃO',
-            'CONCLUSAO', 'CONCLUSÃO', 'ENCERRAMENTO', 'FIM_OS', 'FIM_EXEC', 'DT_FIM', 'DATA_FIM'
+            'DT_NOTA', 'DATA_NOTA', 'NOTA', 'DT_BAIXA', 'DATA_BAIXA', 'FECHAMENTO', 'EXECUCAO', 'EXECUÇÃO',
+            'CONCLUSAO', 'CONCLUSÃO', 'ENCERRAMENTO', 'ABERTURA', 'FIM_OS', 'FIM_EXEC', 'DT_FIM', 'DATA_FIM'
           ];
           const foundFirstLevel = rowKeys.find(rk => {
             const upper = rk.toUpperCase().trim();
@@ -567,9 +597,12 @@ export default function AT5Dashboard({
           return null;
         };
 
-        const rawDateVal = rawAberturaVal !== null && rawAberturaVal !== undefined && String(rawAberturaVal).trim() !== ''
-          ? rawAberturaVal
-          : getRawDateValue();
+        // Primary Date for the AT5 Row & Chart is DT_NOTA whenever present!
+        const primaryDateVal = (rawNotaVal !== null && rawNotaVal !== undefined && String(rawNotaVal).trim() !== '')
+          ? rawNotaVal
+          : ((rawAberturaVal !== null && rawAberturaVal !== undefined && String(rawAberturaVal).trim() !== '')
+            ? rawAberturaVal
+            : getRawDateValue());
 
         const parseDateDetails = (val: any): { display: string; iso: string | null; formattedFull: string } => {
           if (val === null || val === undefined || String(val).trim() === '') {
@@ -674,9 +707,17 @@ export default function AT5Dashboard({
           };
         };
 
-        const dateParsed = parseDateDetails(rawDateVal);
-        const rawDataValue = dateParsed.display;
-        const aberturaFormatted = rawAberturaVal ? parseDateDetails(rawAberturaVal).formattedFull : dateParsed.formattedFull;
+        const notaParsed = (rawNotaVal !== null && rawNotaVal !== undefined && String(rawNotaVal).trim() !== '')
+          ? parseDateDetails(rawNotaVal)
+          : null;
+        const aberturaParsed = (rawAberturaVal !== null && rawAberturaVal !== undefined && String(rawAberturaVal).trim() !== '')
+          ? parseDateDetails(rawAberturaVal)
+          : null;
+        const primaryParsed = parseDateDetails(primaryDateVal);
+
+        const dataNotaDisplay = notaParsed ? notaParsed.display : primaryParsed.display;
+        const dataNotaFormatted = notaParsed ? notaParsed.formattedFull : primaryParsed.formattedFull;
+        const aberturaFormatted = aberturaParsed ? aberturaParsed.formattedFull : primaryParsed.formattedFull;
 
         let qtVal = 1;
         if (rawQt !== null && rawQt !== undefined && rawQt !== '') {
@@ -703,9 +744,11 @@ export default function AT5Dashboard({
           codigoBaixa: finalCodigoBaixa,
           node: rawNode.toUpperCase(),
           contrato: rawContrato,
-          data: rawDataValue,
+          data: dataNotaDisplay, // Data da Nota (ex: '01/09')
+          dataNota: dataNotaDisplay,
+          dataNotaFull: dataNotaFormatted,
           aberturaSolic: aberturaFormatted,
-          dataIso: dateParsed.iso || undefined
+          dataIso: (notaParsed || primaryParsed).iso || undefined
         };
       });
 
