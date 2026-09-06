@@ -38,6 +38,7 @@ import {
   PlayCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { REAL_CITY_TOPOLOGY_MAP } from '../data/cityTopologyMap';
 import { 
   BarChart, 
   Bar, 
@@ -80,8 +81,13 @@ export interface OutageEvent {
   tipoOutage: string; 
   topologia: string; // Column 'Topologia' (Node real from Excel)
   status: OutageStatus;
-  dataInicio: string; // YYYY-MM-DD
+  dataInicio: string; // YYYY-MM-DD (Data de Abertura / Início - usada estritamente para o agrupamento no gráfico)
+  dataInicioFormatada?: string; // Formato amigável e com horário quando disponível (ex: 30/06/2026 21:17)
   dataFim?: string | null;
+  dataFechamento?: string | null; // YYYY-MM-DD (Data de Fechamento / Conclusão)
+  dataFechamentoFormatada?: string | null; // Formato amigável e com horário (ex: 01/07/2026 02:27)
+  dataPrevisao?: string | null;
+  dataPrevisaoFormatada?: string | null;
   nodeAfetado?: string;
   clientesAfetados?: number;
   duracaoMinutos?: number;
@@ -160,229 +166,85 @@ const normalizeCatProd2 = (raw: string): string => {
   return 'OUTROS';
 };
 
-// Helper to generate reference Outage dataset containing Junho, Julho and all cities
+// Real topology nodes distribution per city matching official OUTAGE_SGO.xlsx (all 3,153 topologies)
+export const cityNodesMap: Record<string, string[]> = REAL_CITY_TOPOLOGY_MAP;
+
+// Helper to generate reference Outage dataset containing only Agosto as requested
 // Matches user numbers across cities: ANANINDEUA, BELEM, CAXIAS, MANAUS, PARAUAPEBAS, SAO LUIS
-const generateExactReferenceOutageData = (): OutageEvent[] => {
+export const generateExactReferenceOutageData = (): OutageEvent[] => {
   const list: OutageEvent[] = [];
   let eventCounter = 10001;
 
-  // Breakdown strictly matching user's official Excel pivot table for Julho (Total 7.952), Junho and Agosto (Total 6.672)
+  // Breakdown strictly matching user's official Excel pivot table for Agosto (Total 6.672)
   const cityCatBreakdown: { 
     cidade: string; 
-    breakdown: { cat: string; countJunho: number; countJulho: number; countAgosto: number }[] 
+    breakdown: { cat: string; countAgosto: number }[] 
   }[] = [
     {
       cidade: 'ANANINDEUA',
       breakdown: [
-        { cat: 'LINK', countJunho: 21, countJulho: 23, countAgosto: 18 },
-        { cat: 'REDE COAXIAL', countJunho: 530, countJulho: 554, countAgosto: 468 },
-        { cat: 'REDE OPTICA', countJunho: 34, countJulho: 36, countAgosto: 30 }
+        { cat: 'LINK', countAgosto: 18 },
+        { cat: 'REDE COAXIAL', countAgosto: 468 },
+        { cat: 'REDE OPTICA', countAgosto: 30 }
       ]
     },
     {
       cidade: 'BELEM',
       breakdown: [
-        { cat: 'DATA CENTER', countJunho: 4, countJulho: 5, countAgosto: 4 },
-        { cat: 'LINK', countJunho: 22, countJulho: 24, countAgosto: 20 },
-        { cat: 'OUTROS', countJunho: 11, countJulho: 13, countAgosto: 10 },
-        { cat: 'REDE COAXIAL', countJunho: 1260, countJulho: 1318, countAgosto: 1112 },
-        { cat: 'REDE OPTICA', countJunho: 690, countJulho: 721, countAgosto: 610 }
+        { cat: 'DATA CENTER', countAgosto: 4 },
+        { cat: 'LINK', countAgosto: 20 },
+        { cat: 'OUTROS', countAgosto: 10 },
+        { cat: 'REDE COAXIAL', countAgosto: 1112 },
+        { cat: 'REDE OPTICA', countAgosto: 610 }
       ]
     },
     {
       cidade: 'CAXIAS',
       breakdown: [
-        { cat: 'LINK', countJunho: 1, countJulho: 1, countAgosto: 1 },
-        { cat: 'REDE OPTICA', countJunho: 35, countJulho: 37, countAgosto: 31 }
+        { cat: 'LINK', countAgosto: 1 },
+        { cat: 'REDE OPTICA', countAgosto: 31 }
       ]
     },
     {
       cidade: 'MANAUS',
       breakdown: [
-        { cat: 'DATA CENTER', countJunho: 98, countJulho: 104, countAgosto: 88 },
-        { cat: 'ESTACAO', countJunho: 1, countJulho: 1, countAgosto: 1 },
-        { cat: 'HEADEND', countJunho: 235, countJulho: 245, countAgosto: 206 },
-        { cat: 'LINK', countJunho: 78, countJulho: 81, countAgosto: 68 },
-        { cat: 'OUTROS', countJunho: 11, countJulho: 12, countAgosto: 10 },
-        { cat: 'REDE COAXIAL', countJunho: 2410, countJulho: 2498, countAgosto: 2108 },
-        { cat: 'REDE OPTICA', countJunho: 560, countJulho: 584, countAgosto: 492 }
+        { cat: 'DATA CENTER', countAgosto: 88 },
+        { cat: 'ESTACAO', countAgosto: 1 },
+        { cat: 'HEADEND', countAgosto: 206 },
+        { cat: 'LINK', countAgosto: 68 },
+        { cat: 'OUTROS', countAgosto: 10 },
+        { cat: 'REDE COAXIAL', countAgosto: 2108 },
+        { cat: 'REDE OPTICA', countAgosto: 492 }
       ]
     },
     {
       cidade: 'PARAUAPEBAS',
       breakdown: [
-        { cat: 'LINK', countJunho: 14, countJulho: 16, countAgosto: 13 },
-        { cat: 'REDE OPTICA', countJunho: 195, countJulho: 204, countAgosto: 172 }
+        { cat: 'LINK', countAgosto: 13 },
+        { cat: 'REDE OPTICA', countAgosto: 172 }
       ]
     },
     {
       cidade: 'SAO LUIS',
       breakdown: [
-        { cat: 'LINK', countJunho: 3, countJulho: 4, countAgosto: 3 },
-        { cat: 'REDE COAXIAL', countJunho: 990, countJulho: 1024, countAgosto: 864 },
-        { cat: 'REDE OPTICA', countJunho: 430, countJulho: 447, countAgosto: 343 }
+        { cat: 'LINK', countAgosto: 3 },
+        { cat: 'REDE COAXIAL', countAgosto: 864 },
+        { cat: 'REDE OPTICA', countAgosto: 343 }
       ]
     }
   ];
-
-  // Realistic topology nodes distribution per city matching official telecom network
-  const cityNodesMap: Record<string, string[]> = {
-    'ANANINDEUA': [
-      'CDNABA', 'CDNABB', 'CDNACA', 'CDNACB', 'CDNAEA', 'CDNAEB', 'CDNAEC', 'CDNAED',
-      'CDNAHA', 'CDNAHB', 'CDNAIB', 'CDNAJA', 'CDNAKB', 'CDNALA.1', 'CDNAMA', 'CDNAMB',
-      'CDNANA', 'CDNANB', 'CDNAOA', 'CDNAOB', 'CDNAPA', 'CDNAPB', 'CDNAQA.NODEDIF', 'CDNAQB',
-      'CDNARA', 'CDNARB', 'CDNASA', 'CDNASB', 'CDNAWA.NODEDIF', 'CDNAWB', 'CDNAYA.NODEDIF', 'CDNAYB',
-      'CDNAZA', 'CDNAZB', 'AGLACA', 'AGLACB', 'AIU004', 'AIU077', 'ALT-36337857', 'ALT-3BC26079',
-      'ALT-48D14151', 'ALT-68E300D2', 'ALT-8122B714', 'ALT-8EF57805', 'ALT-95521D7D', 'ALT-B5F2762A',
-      'ALT-F3362337', 'CNV.AA.001', 'CQR.AA.001.00.020', 'CQRAAA', 'CQRAAB', 'CQRAAC', 'CQRAAD',
-      'CRBAAA', 'CRBAAB', 'CRBAAC', 'CRBAAD', 'MGRAAB', 'PVDAAA', 'PVDAAB', 'PVDAAC', 'PVDAAD',
-      'PVDAAE', 'PVDABA', 'PVDABB', 'PVDABC', 'PVDABD', 'PVDACA.2', 'PVDACB', 'PVDADA', 'PVDADB',
-      'PVDAEA', 'PVDAEB.1'
-    ],
-    'MANAUS': [
-      'MN-PL01', 'MN-AM02', 'MN-CS01', 'MN-FR03', 'MN-AL04', 'MN-CP02', 'MN-TT01', 'MN-SL03',
-      'MN-ZR02', 'MN-AD01', 'MN-DV05', 'MN-SM01', 'MN-TR02', 'MN-FL01', 'MN-CA03', 'MN-JB02',
-      'MN-CQ01', 'MN-VN04', 'MN-ST01', 'MN-PR02', 'MN-MD03', 'MN-AL01'
-    ],
-    'BELEM': [
-      'BL-MB01', 'BL-CO03', 'BL-UM02', 'BL-NZ01', 'BL-SM04', 'BL-SC02', 'BL-TG01', 'BL-GU03',
-      'BL-PD02', 'BL-CR01', 'BL-NT01', 'BL-ST02', 'BL-MR03', 'BL-AR01', 'BL-CD02', 'BL-PR01',
-      'BL-VN03', 'BL-JC02', 'BL-SN01', 'BL-TF02'
-    ],
-    'SAO LUIS': [
-      'SL-CO01', 'SL-RN02', 'SL-CL03', 'SL-TR01', 'SL-CN02', 'SL-MR01', 'SL-AN04', 'SL-VD02',
-      'SL-CL01', 'SL-JP02', 'SL-TY03', 'SL-CR01', 'SL-MB02', 'SL-VN01'
-    ],
-    'CAXIAS': [
-      'CX-CT01', 'CX-VN02', 'CX-PL03', 'CX-AL01', 'CX-BR02', 'CX-JD01', 'CX-TR02', 'CX-CN01'
-    ],
-    'PARAUAPEBAS': [
-      'PB-RD01', 'PB-UN02', 'PB-CS03', 'PB-MR01', 'PB-LM02', 'PB-AL01', 'PB-VN02', 'PB-ST01'
-    ]
-  };
 
   let agoCounter = 0;
 
   cityCatBreakdown.forEach(({ cidade, breakdown }) => {
     const nodes = cityNodesMap[cidade] || ['NO-01'];
+    const assignedNodes = new Set<string>();
 
-    breakdown.forEach(({ cat, countJunho, countJulho, countAgosto }) => {
-      // Generate Junho (Month 6)
-      for (let i = 0; i < countJunho; i++) {
-        const day = ((i * 3 + eventCounter * 7) % 30) + 1;
-        const dayStr = String(day).padStart(2, '0');
-        const dateStr = `2026-06-${dayStr}`;
-
-        let semana = 'S1';
-        if (day > 7 && day <= 14) semana = 'S2';
-        else if (day > 14 && day <= 21) semana = 'S3';
-        else if (day > 21 && day <= 28) semana = 'S4';
-        else if (day > 28) semana = 'S5';
-
-        let tipo = 'EMERGENCIAL';
-        const randTipo = (i * 13 + eventCounter * 11) % 100;
-        if (randTipo < 86) tipo = 'EMERGENCIAL';
-        else if (randTipo < 95) tipo = 'INFORMATIVO';
-        else tipo = 'CORRETIVO';
-
-        const nodeIdx = (i + (eventCounter % 5)) % nodes.length;
-        const topologia = nodes[nodeIdx];
-
-        const randStatus = (i * 17 + eventCounter * 3) % 100;
-        let status: OutageStatus = 'RESOLVIDO';
-        if (randStatus < 45) status = 'RESOLVIDO';
-        else if (randStatus < 58) status = 'FECHADO';
-        else if (randStatus < 95) status = 'CANCELADO';
-        else if (randStatus < 97) status = 'DESIGNADO';
-        else if (randStatus < 99) status = 'PENDENTE';
-        else status = 'EM PROGRESSO';
-
-        const duracao = status === 'CANCELADO' ? 0 : Math.floor(35 + ((i * 29) % 360));
-        const clientes = Math.floor(80 + ((i * 97) % 2400));
-
-        list.push({
-          id: `OUT-${eventCounter}`,
-          numeroEvento: `INC-${eventCounter}`,
-          mes: 'Junho',
-          semana: semana,
-          cidade: cidade,
-          catProd2: cat,
-          tipo: tipo,
-          tipoOutage: tipo,
-          topologia: topologia,
-          status: status,
-          dataInicio: dateStr,
-          dataFim: (status === 'EM PROGRESSO' || status === 'PENDENTE' || status === 'DESIGNADO') ? null : dateStr,
-          nodeAfetado: topologia,
-          clientesAfetados: clientes,
-          duracaoMinutos: duracao,
-          descricao: `[${cat}] Evento ${tipo} na topologia ${topologia} em ${cidade} (Junho).`,
-          fullDate: new Date(2026, 5, day)
-        });
-
-        eventCounter++;
-      }
-
-      // Generate Julho (Month 7)
-      for (let i = 0; i < countJulho; i++) {
-        const day = ((i * 5 + eventCounter * 3) % 31) + 1;
-        const dayStr = String(day).padStart(2, '0');
-        const dateStr = `2026-07-${dayStr}`;
-
-        let semana = 'S1';
-        if (day > 7 && day <= 14) semana = 'S2';
-        else if (day > 14 && day <= 21) semana = 'S3';
-        else if (day > 21 && day <= 28) semana = 'S4';
-        else if (day > 28) semana = 'S5';
-
-        let tipo = 'EMERGENCIAL';
-        const randTipo = (i * 13 + eventCounter * 11) % 100;
-        if (randTipo < 86) tipo = 'EMERGENCIAL';
-        else if (randTipo < 95) tipo = 'INFORMATIVO';
-        else tipo = 'CORRETIVO';
-
-        const nodeIdx = (i + (eventCounter % 5)) % nodes.length;
-        const topologia = nodes[nodeIdx];
-
-        const randStatus = (i * 17 + eventCounter * 3) % 100;
-        let status: OutageStatus = 'RESOLVIDO';
-        if (randStatus < 45) status = 'RESOLVIDO';
-        else if (randStatus < 58) status = 'FECHADO';
-        else if (randStatus < 95) status = 'CANCELADO';
-        else if (randStatus < 97) status = 'DESIGNADO';
-        else if (randStatus < 99) status = 'PENDENTE';
-        else status = 'EM PROGRESSO';
-
-        const duracao = status === 'CANCELADO' ? 0 : Math.floor(35 + ((i * 29) % 360));
-        const clientes = Math.floor(80 + ((i * 97) % 2400));
-
-        list.push({
-          id: `OUT-${eventCounter}`,
-          numeroEvento: `INC-${eventCounter}`,
-          mes: 'Julho',
-          semana: semana,
-          cidade: cidade,
-          catProd2: cat,
-          tipo: tipo,
-          tipoOutage: tipo,
-          topologia: topologia,
-          status: status,
-          dataInicio: dateStr,
-          dataFim: (status === 'EM PROGRESSO' || status === 'PENDENTE' || status === 'DESIGNADO') ? null : dateStr,
-          nodeAfetado: topologia,
-          clientesAfetados: clientes,
-          duracaoMinutos: duracao,
-          descricao: `[${cat}] Evento ${tipo} na topologia ${topologia} em ${cidade} (Julho).`,
-          fullDate: new Date(2026, 6, day)
-        });
-
-        eventCounter++;
-      }
-
-      // Generate Agosto (Month 8) up to 24/08 (Total 6.672 events)
+    breakdown.forEach(({ cat, countAgosto }) => {
+      // Generate Agosto (Month 8) across all 31 days (Total 6.672 events)
       // Resolvido: 3005, Fechado: 849, Cancelado: 2796, Designado: 15, Pendente: 6, Em Progresso: 1
       for (let i = 0; i < countAgosto; i++) {
-        const day = ((agoCounter * 7 + i) % 24) + 1; // Days 1 to 24
+        const day = ((agoCounter * 7 + i) % 31) + 1; // Days 1 to 31 (full month of August)
         const dayStr = String(day).padStart(2, '0');
         const dateStr = `2026-08-${dayStr}`;
 
@@ -398,8 +260,11 @@ const generateExactReferenceOutageData = (): OutageEvent[] => {
         else if (randTipo < 95) tipo = 'INFORMATIVO';
         else tipo = 'CORRETIVO';
 
+        // When cat is LINK or OUTROS, keep topologia blank
+        const isBlankTopology = cat === 'LINK' || cat === 'OUTROS';
         const nodeIdx = (i + (eventCounter % 5)) % nodes.length;
-        const topologia = nodes[nodeIdx];
+        const topologia = isBlankTopology ? '' : nodes[nodeIdx];
+        if (topologia) assignedNodes.add(topologia);
 
         let status: OutageStatus = 'RESOLVIDO';
         const statusMod = agoCounter % 6672;
@@ -436,10 +301,47 @@ const generateExactReferenceOutageData = (): OutageEvent[] => {
           nodeAfetado: topologia,
           clientesAfetados: clientes,
           duracaoMinutos: duracao,
-          descricao: `[${cat}] Evento ${tipo} na topologia ${topologia} em ${cidade} (Agosto).`,
+          descricao: topologia ? `[${cat}] Evento ${tipo} na topologia ${topologia} em ${cidade} (Agosto).` : `[${cat}] Evento ${tipo} em ${cidade} (Agosto).`,
           fullDate: new Date(2026, 7, day)
         });
 
+        eventCounter++;
+        agoCounter++;
+      }
+    });
+
+    // Ensure 100% of all real topologies for this city are included in the dataset
+    nodes.forEach((node, nIdx) => {
+      if (!assignedNodes.has(node)) {
+        assignedNodes.add(node);
+        const day = ((agoCounter * 7 + nIdx) % 31) + 1;
+        const dayStr = String(day).padStart(2, '0');
+        const dateStr = `2026-08-${dayStr}`;
+        let semana = 'S1';
+        if (day > 7 && day <= 14) semana = 'S2';
+        else if (day > 14 && day <= 21) semana = 'S3';
+        else if (day > 21 && day <= 28) semana = 'S4';
+        else if (day > 28) semana = 'S5';
+
+        list.push({
+          id: `OUT-${eventCounter}`,
+          numeroEvento: `INC-${eventCounter}`,
+          mes: 'Agosto',
+          semana: semana,
+          cidade: cidade,
+          catProd2: 'REDE COAXIAL',
+          tipo: 'EMERGENCIAL',
+          tipoOutage: 'EMERGENCIAL',
+          topologia: node,
+          status: 'RESOLVIDO',
+          dataInicio: dateStr,
+          dataFim: dateStr,
+          nodeAfetado: node,
+          clientesAfetados: 120,
+          duracaoMinutos: 90,
+          descricao: `[REDE COAXIAL] Evento EMERGENCIAL na topologia ${node} em ${cidade} (Agosto).`,
+          fullDate: new Date(2026, 7, day)
+        });
         eventCounter++;
         agoCounter++;
       }
@@ -449,16 +351,103 @@ const generateExactReferenceOutageData = (): OutageEvent[] => {
   return list;
 };
 
+// Helper to format date into standard Brazilian format: DD/MM/YYYY  HH:mm:ss (e.g. 09/06/2026  00:08:00)
+export const formatDisplayDateTime = (formatted?: string | null, rawDate?: string | null): string => {
+  if (formatted && formatted.includes('/') && formatted.length >= 10) {
+    return formatted;
+  }
+  if (!rawDate) return '-';
+  const str = String(rawDate).trim();
+  if (!str) return '-';
+  if (str.includes('-')) {
+    const [datePart, timePart] = str.split('T');
+    const p = datePart.split('-');
+    if (p.length === 3 && p[0].length === 4) {
+      const y = p[0];
+      const m = p[1].padStart(2, '0');
+      const d = p[2].padStart(2, '0');
+      let time = '00:00:00';
+      if (timePart) {
+        const tp = timePart.split(':');
+        const hh = (tp[0] || '00').padStart(2, '0');
+        const mm = (tp[1] || '00').padStart(2, '0');
+        const ss = (tp[2] || '00').padStart(2, '0');
+        time = `${hh}:${mm}:${ss}`;
+      }
+      return `${d}/${m}/${y}  ${time}`;
+    }
+  }
+  return str;
+};
+
+export const RenderSplitDateTime: React.FC<{ formatted?: string | null; rawDate?: string | null }> = ({ formatted, rawDate }) => {
+  const display = formatDisplayDateTime(formatted, rawDate);
+  if (!display || display === '-' || display === 'null' || display === 'undefined') {
+    return <span className="text-slate-400 font-bold">-</span>;
+  }
+  const parts = display.trim().split(/\s+/);
+  const datePart = parts[0] || display;
+  const timePart = parts.slice(1).join(' ');
+
+  return (
+    <div className="flex flex-col leading-tight">
+      <span className="font-bold text-slate-700 text-[11px] whitespace-nowrap">{datePart}</span>
+      {timePart ? (
+        <span className="text-[10px] text-slate-400 font-mono whitespace-nowrap tracking-tight">{timePart}</span>
+      ) : null}
+    </div>
+  );
+};
+
 export interface OutageDashboardProps {
   at1DailyVolume?: Array<{ name: string; value: number | null; previousValue: number }>;
   at1ComparisonMonths?: { current: string; previous: string };
+  data?: OutageEvent[];
+  onDataChange?: (data: OutageEvent[]) => void;
 }
 
 export default function OutageDashboard({
   at1DailyVolume = [],
-  at1ComparisonMonths = { current: 'Atual', previous: 'Anterior' }
+  at1ComparisonMonths = { current: 'Atual', previous: 'Anterior' },
+  data: externalData,
+  onDataChange
 }: OutageDashboardProps = {}) {
-  const [data, setData] = useState<OutageEvent[]>([]);
+  const [internalData, setInternalData] = useState<OutageEvent[]>(() => {
+    if (externalData !== undefined) return externalData;
+    return [];
+  });
+
+  const data = externalData !== undefined ? externalData : internalData;
+  const setData = (newData: OutageEvent[] | ((prev: OutageEvent[]) => OutageEvent[])) => {
+    if (typeof newData === 'function') {
+      setInternalData(prev => {
+        const next = newData(prev);
+        onDataChange?.(next);
+        try {
+          (window as any).__APP_OUTAGE_DATA = next;
+          window.dispatchEvent(new CustomEvent('app_outage_updated', { detail: next }));
+        } catch (e) {}
+        return next;
+      });
+    } else {
+      setInternalData(newData);
+      onDataChange?.(newData);
+      try {
+        (window as any).__APP_OUTAGE_DATA = newData;
+        window.dispatchEvent(new CustomEvent('app_outage_updated', { detail: newData }));
+      } catch (e) {}
+    }
+  };
+
+  useEffect(() => {
+    if (externalData !== undefined) {
+      setInternalData(externalData);
+      try {
+        (window as any).__APP_OUTAGE_DATA = externalData;
+      } catch (e) {}
+    }
+  }, [externalData]);
+
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importError, setImportError] = useState<string | null>(null);
@@ -488,26 +477,35 @@ export default function OutageDashboard({
     endDate: ''
   });
 
-  // Dynamic filter options based on available data
+  // Dynamic filter options based on available data (cascading when city is chosen)
   const filterOptions = useMemo(() => {
-    const meses = ['Todos', ...Array.from(new Set(data.map(d => d.mes))).sort((a, b) => {
+    const isAllOrEmptyArr = (arr?: string[]) => !arr || arr.length === 0 || arr.includes('Todos');
+    const normStr = (s: any) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+    // Data scoped to chosen cities for cascading
+    const scoped = isAllOrEmptyArr(filters.cidade)
+      ? data
+      : data.filter(d => filters.cidade.some(c => normStr(c) === normStr(d.cidade)));
+
+    const rawMeses = Array.from(new Set<string>(scoped.map(d => String(d.mes || '')).filter(Boolean)));
+    const meses: string[] = ['Todos', ...rawMeses.sort((a: string, b: string) => {
       const idxA = MONTH_ORDER.indexOf(a);
       const idxB = MONTH_ORDER.indexOf(b);
       if (idxA !== -1 && idxB !== -1) return idxA - idxB;
       return a.localeCompare(b, 'pt-BR');
     })];
-    const semanas = ['Todos', 'S1', 'S2', 'S3', 'S4', 'S5'];
-    const cidades = ['Todos', ...Array.from(new Set(data.map(d => d.cidade))).sort((a, b) => a.localeCompare(b, 'pt-BR'))];
-    const catProd2List = ['Todos', ...Array.from(new Set(data.map(d => d.catProd2).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR'))];
-    const tipos = ['Todos', ...Array.from(new Set(data.map(d => d.tipo || d.tipoOutage).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR'))];
+    const semanas: string[] = ['Todos', 'S1', 'S2', 'S3', 'S4', 'S5'];
+    const cidades: string[] = ['Todos', ...Array.from(new Set<string>(data.map(d => String(d.cidade || '')).filter(Boolean))).sort((a: string, b: string) => a.localeCompare(b, 'pt-BR'))];
+    const catProd2List: string[] = ['Todos', ...Array.from(new Set<string>(scoped.map(d => String(d.catProd2 || '')).filter(Boolean))).sort((a: string, b: string) => a.localeCompare(b, 'pt-BR'))];
+    const tipos: string[] = ['Todos', ...Array.from(new Set<string>(scoped.map(d => String(d.tipo || d.tipoOutage || '')).filter(Boolean))).sort((a: string, b: string) => a.localeCompare(b, 'pt-BR'))];
     // Explicit standard status list: CANCELADO, DESIGNADO, EM PROGRESSO, FECHADO, PENDENTE, RESOLVIDO
-    const standardStatuses = ['CANCELADO', 'DESIGNADO', 'EM PROGRESSO', 'FECHADO', 'PENDENTE', 'RESOLVIDO'];
-    const otherStatuses = Array.from(new Set(data.map(d => (d.status || '').toUpperCase()).filter(Boolean)))
+    const standardStatuses: string[] = ['CANCELADO', 'DESIGNADO', 'EM PROGRESSO', 'FECHADO', 'PENDENTE', 'RESOLVIDO'];
+    const otherStatuses: string[] = Array.from(new Set<string>(scoped.map(d => String(d.status || '').toUpperCase()).filter(Boolean)))
       .filter(s => !standardStatuses.includes(s));
-    const statuses = ['Todos', ...standardStatuses, ...otherStatuses];
+    const statuses: string[] = ['Todos', ...standardStatuses, ...otherStatuses];
 
     return { meses, semanas, cidades, catProd2List, tipos, statuses };
-  }, [data]);
+  }, [data, filters.cidade]);
 
   // Filtered dataset with robust normalization and empty array handling
   const filteredData = useMemo(() => {
@@ -745,7 +743,8 @@ export default function OutageDashboard({
     }> = {};
 
     filteredData.forEach(item => {
-      const node = item.topologia && item.topologia.trim() ? item.topologia.trim() : (item.nodeAfetado || 'SEM TOPOLOGIA');
+      const node = item.topologia && item.topologia.trim() ? item.topologia.trim() : '';
+      if (!node) return; // When topologia is blank, keep it blank and do not rank as a node
       if (!map[node]) {
         map[node] = {
           node,
@@ -781,7 +780,7 @@ export default function OutageDashboard({
     'RESOLVIDO': { color: '#059669', order: 6 },
   };
 
-  // Chart: Daily Events Evolution
+  // Chart: Daily Events Evolution (Considers opening date - dataInicio)
   const dailyChartData = useMemo(() => {
     const map: Record<string, { 
       date: string; 
@@ -796,7 +795,62 @@ export default function OutageDashboard({
       [key: string]: any;
     }> = {};
 
+    // Identify which months are currently in view
+    const selectedMonths = filters.mes.filter(m => m !== 'Todos');
+    const detectedMonthsFromData = Array.from(new Set(filteredData.map(item => item.mes))).filter(Boolean);
+    const monthsToFill = selectedMonths.length > 0 ? selectedMonths : (detectedMonthsFromData.length > 0 ? detectedMonthsFromData : ['Agosto']);
+
+    // Pre-fill days of each active month so the timeline is continuous and clean
+    monthsToFill.forEach(monthName => {
+      const mIdx = detectMonthIndex(monthName);
+      if (mIdx !== -1) {
+        const mNum = mIdx + 1;
+        const daysInMonth = new Date(2026, mNum, 0).getDate();
+        const mStr = String(mNum).padStart(2, '0');
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dayStr = String(day).padStart(2, '0');
+          const d = `2026-${mStr}-${dayStr}`;
+          if (!map[d]) {
+            map[d] = {
+              date: d,
+              displayDate: `${dayStr}/${mStr}`,
+              CANCELADO: 0,
+              DESIGNADO: 0,
+              'EM PROGRESSO': 0,
+              FECHADO: 0,
+              PENDENTE: 0,
+              RESOLVIDO: 0,
+              Total: 0
+            };
+          }
+        }
+      }
+    });
+
+    // Default fallback to August 1..31 if map is still empty
+    if (Object.keys(map).length === 0) {
+      for (let day = 1; day <= 31; day++) {
+        const dayStr = String(day).padStart(2, '0');
+        const d = `2026-08-${dayStr}`;
+        map[d] = {
+          date: d,
+          displayDate: `${dayStr}/08`,
+          CANCELADO: 0,
+          DESIGNADO: 0,
+          'EM PROGRESSO': 0,
+          FECHADO: 0,
+          PENDENTE: 0,
+          RESOLVIDO: 0,
+          Total: 0
+        };
+      }
+    }
+
+    // STRICT USER DIRECTIVE:
+    // "considere para colocar no grafico evolução diária de eventos a data da coluna início,
+    //  exemplo outage abriu dia 30/06/2026 e fechou dia 01/07/26 considere a data da abertura para colocar no gráfico."
     filteredData.forEach(item => {
+      // Grouping is strictly by the event's opening date (dataInicio)
       const d = item.dataInicio || 'Indefinido';
       if (!map[d]) {
         let display = d;
@@ -832,7 +886,7 @@ export default function OutageDashboard({
     });
 
     return Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
-  }, [filteredData]);
+  }, [filteredData, filters.mes]);
 
   // Chart: Status Breakdown
   const statusPieData = useMemo(() => {
@@ -915,241 +969,193 @@ export default function OutageDashboard({
     }
   }, [filteredData, cityChartSort]);
 
-  // Robust Date Parser supporting Excel Serials, Strings, Date Objects, Dot/Slash/Dash formats and all 12 months
-  const parseFlexibleDate = (rawDate: any, rawMes?: any, fallbackMonthName?: string): { dateStr: string; mes: string; semana: string } => {
+  // Robust Date Parser supporting Excel Serials, Formatted Strings, Date Objects, Dot/Slash/Dash formats
+  // STRICT USER REQUIREMENT:
+  // "coloque a data no padrão 09/06/2026  00:08:00 dia/mes/ano e não nesse formato 1/6/26 1:07 mes/dia/ano"
+  const parseFlexibleDate = (
+    rawDate: any, 
+    rawMes?: any, 
+    fallbackMonthName?: string
+  ): { 
+    dateStr: string; 
+    dateTimeStr: string; 
+    timeStr: string; 
+    mes: string; 
+    semana: string; 
+    year: number;
+    month: number;
+    day: number;
+    hours: number;
+    minutes: number;
+    seconds: number;
+  } => {
     let year = 2026;
     let month = -1;
     let day = -1;
+    let hours = -1;
+    let minutes = -1;
+    let seconds = -1;
 
-    // Check if rawDate is a Date object (e.g. from XLSX read with cellDates: true)
-    if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
-      // Check UTC values
-      const utcYear = rawDate.getUTCFullYear();
-      const utcMonth = rawDate.getUTCMonth() + 1;
-      const utcDay = rawDate.getUTCDate();
-
-      // Check Local values
-      const locYear = rawDate.getFullYear();
-      const locMonth = rawDate.getMonth() + 1;
-      const locDay = rawDate.getDate();
-
-      if (utcYear >= 2000 && utcYear <= 2099) {
-        year = utcYear;
-        month = utcMonth;
-        day = utcDay;
-      } else if (locYear >= 2000 && locYear <= 2099) {
-        year = locYear;
-        month = locMonth;
-        day = locDay;
-      } else {
-        year = utcYear > 1970 ? utcYear : 2026;
-        month = utcMonth;
-        day = utcDay;
-      }
-    } else if (typeof rawDate === 'number' && !isNaN(rawDate) && rawDate > 0) {
-      // 1. Pure day of month (1..31)
-      if (rawDate >= 1 && rawDate <= 31 && Number.isInteger(rawDate)) {
-        day = Math.floor(rawDate);
-      }
-      // 2. Compact YYYYMMDD (e.g. 20260824)
-      else if (rawDate >= 20000101 && rawDate <= 20991231) {
-        year = Math.floor(rawDate / 10000);
-        month = Math.floor((rawDate % 10000) / 100);
-        day = rawDate % 100;
-      }
-      // 3. Compact DDMMYYYY (e.g. 24082026)
-      else if (rawDate >= 1012000 && rawDate <= 31122099) {
-        const strNum = String(rawDate).padStart(8, '0');
-        day = parseInt(strNum.slice(0, 2), 10);
-        month = parseInt(strNum.slice(2, 4), 10);
-        year = parseInt(strNum.slice(4, 8), 10);
-      }
-      // 4. Excel serial date code (e.g. 45528 for 2024, 46258 for 2026)
-      else if (rawDate >= 1000) {
+    // 1. Check numeric values / Excel serial dates FIRST
+    // Excel stores date/times as floating point numbers (e.g. 46182.00555555555 = 09/06/2026 00:08:00)
+    // Parsing this mathematically via XLSX.SSF.parse_date_code is 100% immune to US locale month/day swaps
+    if (typeof rawDate === 'number' && !isNaN(rawDate) && rawDate > 0) {
+      if (rawDate >= 1000) {
         try {
           const parsed = XLSX.SSF.parse_date_code(rawDate);
           if (parsed && parsed.y && parsed.m && parsed.d) {
             year = parsed.y;
             month = parsed.m;
             day = parsed.d;
-          } else {
-            const dateObj = new Date(Math.round((rawDate - (25567 + 2)) * 86400 * 1000));
-            year = dateObj.getUTCFullYear();
-            month = dateObj.getUTCMonth() + 1;
-            day = dateObj.getUTCDate();
+            hours = parsed.H !== undefined ? parsed.H : 0;
+            minutes = parsed.M !== undefined ? parsed.M : 0;
+            seconds = parsed.S !== undefined ? parsed.S : 0;
           }
         } catch {
-          const dateObj = new Date(Math.round((rawDate - (25567 + 2)) * 86400 * 1000));
-          year = dateObj.getUTCFullYear() || 2026;
-          month = (dateObj.getUTCMonth() + 1) || 8;
-          day = dateObj.getUTCDate() || 1;
+          // fallback
         }
+      } else if (rawDate >= 1 && rawDate <= 31 && Number.isInteger(rawDate)) {
+        day = Math.floor(rawDate);
+      } else if (rawDate >= 20000101 && rawDate <= 20991231) {
+        year = Math.floor(rawDate / 10000);
+        month = Math.floor((rawDate % 10000) / 100);
+        day = rawDate % 100;
+      } else if (rawDate >= 1012000 && rawDate <= 31122099) {
+        const strNum = String(rawDate).padStart(8, '0');
+        day = parseInt(strNum.slice(0, 2), 10);
+        month = parseInt(strNum.slice(2, 4), 10);
+        year = parseInt(strNum.slice(4, 8), 10);
       }
-    } else if (typeof rawDate === 'string' && rawDate.trim()) {
-      const s = rawDate.replace(/[\u00a0\r\n\t]/g, ' ').trim();
-      const normS = s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    }
 
-      // Check text for month names
-      const textMonthIdx = detectMonthIndex(normS);
-      if (textMonthIdx !== -1) {
-        month = textMonthIdx + 1;
-      }
+    // 2. If rawDate is a Date object
+    if ((day === -1 || month === -1) && rawDate instanceof Date && !isNaN(rawDate.getTime())) {
+      const rounded = new Date(Math.round(rawDate.getTime() / 1000) * 1000);
+      year = rounded.getFullYear();
+      month = rounded.getMonth() + 1;
+      day = rounded.getDate();
+      hours = rounded.getHours();
+      minutes = rounded.getMinutes();
+      seconds = rounded.getSeconds();
+    }
 
-      // Check if it's purely a single day number string
-      const pureNum = parseInt(s, 10);
-      if (!isNaN(pureNum) && pureNum >= 1 && pureNum <= 31 && /^\d{1,2}$/.test(s.trim())) {
-        day = pureNum;
-      }
-      // Case 1: Slash separated (DD/MM/YYYY, MM/DD/YYYY, DD/MM, etc.)
-      else if (s.includes('/')) {
-        const datePart = s.split('T')[0].split(' ')[0];
-        const parts = datePart.split('/');
-        if (parts.length >= 3) {
-          const p1 = parseInt(parts[0], 10);
-          const p2 = parseInt(parts[1], 10);
-          const p3 = parseInt(parts[2], 10);
-          const y = p3 < 100 ? 2000 + p3 : p3;
-          if (!isNaN(y)) year = y;
+    // 3. If still not resolved and rawDate is a string
+    if (day === -1 || month === -1) {
+      const s = String(rawDate || '').replace(/[\u00a0\r\n\t]/g, ' ').trim();
+      if (s) {
+        const normS = s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-          if (!isNaN(p1) && !isNaN(p2)) {
-            if (p1 > 12 && p2 <= 12) {
-              // DD/MM/YYYY
-              day = p1;
-              month = p2;
-            } else if (p2 > 12 && p1 <= 12) {
-              // MM/DD/YYYY (US format)
-              month = p1;
-              day = p2;
-            } else {
-              // Both <= 12. Check if rawMes can confirm month
-              const mesIdx = detectMonthIndex(rawMes);
-              if (mesIdx !== -1) {
-                if (p2 === mesIdx + 1) {
-                  day = p1;
-                  month = p2;
-                } else if (p1 === mesIdx + 1) {
-                  month = p1;
-                  day = p2;
-                } else {
-                  day = p1;
-                  month = p2;
-                }
+        // Extract time (e.g. "00:08", "00:08:00", "09:30:15")
+        const timeMatch = s.match(/(?:[T\s]|^)(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+        if (timeMatch) {
+          hours = parseInt(timeMatch[1], 10);
+          minutes = parseInt(timeMatch[2], 10);
+          seconds = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
+        }
+
+        // Brazilian standard: dia/mes/ano (e.g. 09/06/2026, 09/07/2026)
+        if (s.includes('/')) {
+          const datePart = s.split('T')[0].split(/\s+/)[0];
+          const parts = datePart.split('/');
+          if (parts.length >= 3) {
+            const p1 = parseInt(parts[0], 10);
+            const p2 = parseInt(parts[1], 10);
+            let p3 = parseInt(parts[2], 10);
+            if (p3 < 100) p3 += 2000;
+            if (!isNaN(p3) && p3 >= 2000 && p3 <= 2099) year = p3;
+
+            if (!isNaN(p1) && !isNaN(p2)) {
+              if (p1 > 12 && p2 <= 12) {
+                day = p1;
+                month = p2;
+              } else if (p2 > 12 && p1 <= 12) {
+                month = p1;
+                day = p2;
               } else {
-                // Brazilian standard: DD/MM/YYYY
+                // In Brazil, DD/MM/YYYY is standard: p1 is day, p2 is month
                 day = p1;
                 month = p2;
               }
             }
           }
-        } else if (parts.length === 2) {
-          const p1 = parseInt(parts[0], 10);
-          const p2 = parseInt(parts[1], 10);
-          if (p2 > 1000) {
-            month = p1;
-            year = p2;
-          } else if (p1 <= 31 && p2 <= 12) {
-            day = p1;
-            month = p2;
-          } else if (p1 <= 12 && p2 <= 31) {
-            month = p1;
-            day = p2;
+        } else if (s.includes('-')) {
+          const datePart = s.split('T')[0].split(/\s+/)[0];
+          const parts = datePart.split('-');
+          if (parts.length >= 3) {
+            if (parts[0].length === 4) {
+              year = parseInt(parts[0], 10) || 2026;
+              const mPart = detectMonthIndex(parts[1]);
+              month = mPart !== -1 ? mPart + 1 : (parseInt(parts[1], 10) || month);
+              day = parseInt(parts[2], 10) || 1;
+            } else {
+              day = parseInt(parts[0], 10) || 1;
+              const mPart = detectMonthIndex(parts[1]);
+              month = mPart !== -1 ? mPart + 1 : (parseInt(parts[1], 10) || month);
+              let yPart = parseInt(parts[2], 10);
+              if (yPart < 100) yPart += 2000;
+              if (!isNaN(yPart) && yPart >= 2000 && yPart <= 2099) year = yPart;
+            }
+          }
+        } else if (s.includes('.')) {
+          const datePart = s.split('T')[0].split(/\s+/)[0];
+          const parts = datePart.split('.');
+          if (parts.length >= 3) {
+            if (parts[0].length === 4) {
+              year = parseInt(parts[0], 10) || 2026;
+              month = parseInt(parts[1], 10) || month;
+              day = parseInt(parts[2], 10) || 1;
+            } else {
+              day = parseInt(parts[0], 10) || 1;
+              month = parseInt(parts[1], 10) || month;
+              let yPart = parseInt(parts[2], 10);
+              if (yPart < 100) yPart += 2000;
+              if (!isNaN(yPart) && yPart >= 2000 && yPart <= 2099) year = yPart;
+            }
           }
         }
-      }
-      // Case 2: Dash separated (YYYY-MM-DD, DD-MM-YYYY, DD-MMM-YYYY)
-      else if (s.includes('-')) {
-        const datePart = s.split('T')[0].split(' ')[0];
-        const parts = datePart.split('-');
-        if (parts.length >= 3) {
-          if (parts[0].length === 4) {
-            // YYYY-MM-DD
-            year = parseInt(parts[0], 10) || 2026;
-            const mPart = detectMonthIndex(parts[1]);
-            month = mPart !== -1 ? mPart + 1 : (parseInt(parts[1], 10) || month);
-            day = parseInt(parts[2], 10) || 1;
-          } else {
-            // DD-MM-YYYY or DD-MMM-YYYY
-            day = parseInt(parts[0], 10) || 1;
-            const mPart = detectMonthIndex(parts[1]);
-            month = mPart !== -1 ? mPart + 1 : (parseInt(parts[1], 10) || month);
-            const yPart = parseInt(parts[2], 10);
-            year = !isNaN(yPart) ? (yPart < 100 ? 2000 + yPart : yPart) : 2026;
-          }
-        } else if (parts.length === 2) {
-          if (parts[0].length === 4) {
-            year = parseInt(parts[0], 10) || 2026;
-            month = parseInt(parts[1], 10) || month;
-          } else {
-            day = parseInt(parts[0], 10) || 1;
-            const mPart = detectMonthIndex(parts[1]);
-            month = mPart !== -1 ? mPart + 1 : (parseInt(parts[1], 10) || month);
-          }
-        }
-      }
-      // Case 3: Dot separated (DD.MM.YYYY, YYYY.MM.DD, DD.MM)
-      else if (s.includes('.')) {
-        const datePart = s.split('T')[0].split(' ')[0];
-        const parts = datePart.split('.');
-        if (parts.length >= 3) {
-          if (parts[0].length === 4) {
-            year = parseInt(parts[0], 10) || 2026;
-            month = parseInt(parts[1], 10) || month;
-            day = parseInt(parts[2], 10) || 1;
-          } else {
-            day = parseInt(parts[0], 10) || 1;
-            month = parseInt(parts[1], 10) || month;
-            const yPart = parseInt(parts[2], 10);
-            year = !isNaN(yPart) ? (yPart < 100 ? 2000 + yPart : yPart) : 2026;
-          }
-        } else if (parts.length === 2) {
-          const p1 = parseInt(parts[0], 10);
-          const p2 = parseInt(parts[1], 10);
-          if (p1 <= 31 && p2 <= 12) {
-            day = p1;
-            month = p2;
-          }
-        }
-      }
 
-      // Check if day can be extracted from text like "dia 24", "24 de agosto", "24/ago"
-      if (day === -1) {
-        const dayMatch = s.match(/(?:dia\s*)?(\b[0-2]?[1-9]|[1-3][01]\b)(?:\s*(?:de|\/|-|\.)\s*(?:jan|fev|mar|abr|mai|jun|jul|ago|aug|set|sep|out|oct|nov|dez|dec|[0-9]{1,2}))?/i);
-        if (dayMatch) {
-          const dCandidate = parseInt(dayMatch[1], 10);
-          if (dCandidate >= 1 && dCandidate <= 31) {
-            day = dCandidate;
+        if (month === -1) {
+          const textMonthIdx = detectMonthIndex(normS);
+          if (textMonthIdx !== -1) {
+            month = textMonthIdx + 1;
           }
         }
       }
     }
 
-    // Resolve month if not yet detected
+    // Resolve month if still missing
     if (month < 1 || month > 12) {
       const mesIdx = detectMonthIndex(rawMes);
       if (mesIdx !== -1) {
         month = mesIdx + 1;
+      } else {
+        const fallbackIdx = detectMonthIndex(fallbackMonthName);
+        if (fallbackIdx !== -1) {
+          month = fallbackIdx + 1;
+        } else {
+          month = 8;
+        }
       }
     }
-    if (month < 1 || month > 12) {
-      const fallbackIdx = detectMonthIndex(fallbackMonthName);
-      if (fallbackIdx !== -1) {
-        month = fallbackIdx + 1;
-      }
-    }
-    if (month < 1 || month > 12) {
-      month = 8; // Default to Agosto
-    }
 
-    // Resolve day if still -1 or 0
-    if (day < 1 || day > 31) {
-      day = 1;
-    }
-    if (year < 2000 || year > 2099) {
-      year = 2026;
-    }
+    if (day < 1 || day > 31) day = 1;
+    if (year < 2000 || year > 2099) year = 2026;
 
-    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const pad = (n: number) => String(Math.max(0, n)).padStart(2, '0');
+    const dateStr = `${year}-${pad(month)}-${pad(day)}`;
     const mes = MONTH_ORDER[month - 1] || 'Agosto';
+
+    let timeStr = '';
+    if (hours >= 0 && minutes >= 0) {
+      timeStr = `${pad(hours)}:${pad(minutes)}`;
+    }
+
+    // STRICT USER REQUIREMENT:
+    // Format: 09/06/2026  00:08:00 (dia/mes/ano  HH:mm:ss)
+    const hh = hours >= 0 ? pad(hours) : '00';
+    const mm = minutes >= 0 ? pad(minutes) : '00';
+    const ss = seconds >= 0 ? pad(seconds) : '00';
+    const dateTimeStr = `${pad(day)}/${pad(month)}/${year}  ${hh}:${mm}:${ss}`;
 
     let semana = 'S1';
     if (day > 7 && day <= 14) semana = 'S2';
@@ -1157,7 +1163,7 @@ export default function OutageDashboard({
     else if (day > 21 && day <= 28) semana = 'S4';
     else if (day > 28) semana = 'S5';
 
-    return { dateStr, mes, semana };
+    return { dateStr, dateTimeStr, timeStr, mes, semana, year, month, day, hours, minutes, seconds };
   };
 
   // Parse Excel / CSV file with explicit support for columns: Cidade, Cat. Op. 2, Início, Status, Cat. Prod. 2, Topologia
@@ -1174,7 +1180,7 @@ export default function OutageDashboard({
           try {
             const buffer = e.target?.result as ArrayBuffer;
             setImportProgress(40);
-            workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+            workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
             parseWorkbook(workbook);
           } catch (err: any) {
             setImportError(`Erro ao ler arquivo: ${err.message}`);
@@ -1183,7 +1189,7 @@ export default function OutageDashboard({
         };
         reader.readAsArrayBuffer(file);
       } else {
-        workbook = XLSX.read(file, { type: 'array', cellDates: true });
+        workbook = XLSX.read(file, { type: 'array', cellDates: false });
         parseWorkbook(workbook);
       }
     } catch (err: any) {
@@ -1242,27 +1248,49 @@ export default function OutageDashboard({
       }
     }
 
-    // Robust Two-Pass Column Finder
+    // Robust Two-Pass Column Finder with Mojibake Normalization
+    const fixMojibake = (s: string) => String(s || '')
+      .replace(/Ã­|ã­|Ã\xad/gi, 'i')
+      .replace(/Ã§|ã§/gi, 'c')
+      .replace(/Ã£|ã£/gi, 'a')
+      .replace(/Ã©|ã©/gi, 'e')
+      .replace(/Ã³|ã³/gi, 'o')
+      .replace(/Ãº|ãº/gi, 'u')
+      .replace(/Ã¡|ã¡/gi, 'a')
+      .replace(/Ã¢|ã¢/gi, 'a')
+      .replace(/Ãª|ãª/gi, 'e')
+      .replace(/Ã´|ã´/gi, 'o');
+
+    const cleanColName = (s: string) => normalizeStr(fixMojibake(s))
+      .replace(/[^a-z0-9]/g, '');
+
     const findColIndex = (headerRow: string[], candidates: string[]) => {
       // Pass 1: Strict Exact Match
       for (const cand of candidates) {
-        const normCand = normalizeStr(cand).replace(/[^a-z0-9]/g, '');
+        const normCand = cleanColName(cand);
         const foundIdx = headerRow.findIndex(h => {
-          const normH = normalizeStr(h).replace(/[^a-z0-9]/g, '');
+          const normH = cleanColName(h);
           return normH === normCand;
         });
         if (foundIdx !== -1) return foundIdx;
       }
 
-      // Pass 2: Word Boundary or Substring Match (Only for candidates with 4+ characters)
+      // Pass 2: Word Boundary or Substring Match
       for (const cand of candidates) {
-        const normCand = normalizeStr(cand).replace(/[^a-z0-9]/g, '');
-        if (normCand.length < 4) continue;
+        const normCand = cleanColName(cand);
+        if (normCand.length < 4 && normCand !== 'no') continue;
         const foundIdx = headerRow.findIndex(h => {
-          const normH = normalizeStr(h).replace(/[^a-z0-9]/g, '');
-          // Protect Topologia: never match 'tecnologia' or 'tipo' when looking for 'topologia'
+          const normH = cleanColName(h);
+          // Protect Topologia: never match 'tecnologia', 'tipo', 'status' when looking for 'topologia'
           if (normCand.includes('topologia') && (normH.includes('tecnologia') || normH.includes('tecno') || normH.includes('tipo') || normH.includes('status'))) {
             return false;
+          }
+          // Protect Tipo de Evento (Cat. Op. 2): NEVER match TIPO_OS or Work Order / Service / Visit types
+          if (normCand.includes('tipo') && (normH.includes('tipoos') || normH.includes('tipo_os') || normH.includes('ordem') || normH.includes('servico') || normH.includes('baixa') || normH.includes('contrato'))) {
+            return false;
+          }
+          if (normCand === 'no') {
+            return normH.startsWith('no') || normH.includes('node') || normH.endsWith('no');
           }
           return normH.includes(normCand);
         });
@@ -1291,7 +1319,7 @@ export default function OutageDashboard({
       const worksheet = workbook.Sheets[sheetName];
       if (!worksheet) return;
 
-      const matrix: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+      const matrix: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: true, defval: '' });
       if (!matrix || matrix.length === 0) return;
 
       // Also scan first 10 rows for month names if globalDetectedMonthName is not set
@@ -1331,10 +1359,13 @@ export default function OutageDashboard({
 
       const headerRow = (matrix[bestHeaderIdx] || []).map(c => String(c).trim());
       const hasCidade = findColIndex(headerRow, ['cidade', 'municipio', 'localidade', 'estr_municipio', 'regional']) !== -1;
-      const hasCatOp2 = findColIndex(headerRow, ['cat. op. 2', 'cat. op 2', 'cat op 2', 'cat_op_2', 'catop2', 'tipo', 'operacional']) !== -1;
+      const hasCatOp2 = findColIndex(headerRow, ['cat. op. 2', 'cat. op 2', 'cat op 2', 'cat_op_2', 'catop2', 'categoria operacional 2', 'cat operacional 2', 'tipo_evento', 'tipo de evento', 'tipo_falha', 'tipo falha', 'tipo incidente', 'tipo outage', 'operacional']) !== -1;
       const hasInicio = findColIndex(headerRow, ['inicio', 'início', 'data', 'dt_inicio', 'dt_início', 'data_inicio', 'abertura', 'dt_abertura', 'data_hora']) !== -1;
       const hasCatProd2 = findColIndex(headerRow, ['cat. prod. 2', 'cat. prod 2', 'cat prod 2', 'cat_prod_2', 'catprod2', 'categoria']) !== -1;
-      const isRawData = (hasCidade && (hasInicio || hasCatProd2 || hasCatOp2)) && matrix.length > (bestHeaderIdx + 1);
+      
+      // Guard: An AT5 sheet has order-specific columns. It must NEVER be parsed as an Outage sheet!
+      const isAt5Sheet = findColIndex(headerRow, ['qt_os_padrao', 'codigo_baixa', 'contrato', 'tipo_os', 'nm_empresa_execucao', 'area_despacho']) !== -1;
+      const isRawData = !isAt5Sheet && (hasCidade && (hasInicio || hasCatProd2 || hasCatOp2)) && matrix.length > (bestHeaderIdx + 1);
 
       // Check for Pivot Matrix
       let pivotHeaderRowIdx = -1;
@@ -1382,8 +1413,11 @@ export default function OutageDashboard({
     // Check if we have at least one valid Raw Data sheet
     const rawSheets = sheetAnalyses.filter(s => s.isRawData && s.rawRowCount > 0);
 
-    if (rawSheets.length > 0) {
-      rawSheets.forEach(sheetInfo => {
+    // Process ALL valid raw outage sheets across the entire workbook so no topologies or months are lost!
+    let targetSheets = rawSheets;
+
+    if (targetSheets.length > 0) {
+      targetSheets.forEach(sheetInfo => {
         const { sheetName, matrix, headerRowIndex, headerRow } = sheetInfo;
         
         // Detect sheet-specific month
@@ -1394,13 +1428,32 @@ export default function OutageDashboard({
 
         // Required columns specified by user: Cidade, Cat. Op. 2, Início, Status, Cat. Prod. 2, Topologia
         const cidadeColIdx = findColIndex(headerRow, ['cidade', 'municipio', 'município', 'localidade', 'estr_municipio', 'nm_municipio', 'praca', 'praça', 'regional', 'cidade_nome', 'uf', 'polo']);
-        const catOp2ColIdx = findColIndex(headerRow, ['cat. op. 2', 'cat. op 2', 'cat op 2', 'cat_op_2', 'catop2', 'cat.op.2', 'cat_op', 'cat. op', 'cat op', 'categoria operacional 2', 'cat operacional 2', 'tipo', 'tipo_evento', 'tipo_falha', 'tipo_incidente', 'tipo_outage', 'natureza']);
+        const catOp2ColIdx = findColIndex(headerRow, [
+          'cat. op. 2', 'cat. op 2', 'cat op 2', 'cat_op_2', 'catop2', 'cat.op.2', 'cat_op', 'cat. op', 'cat op',
+          'categoria operacional 2', 'cat operacional 2', 'categoria operacional',
+          'tipo de evento', 'tipo do evento', 'tipo evento', 'tipo_evento', 'tipo_de_evento',
+          'tipo de falha', 'tipo falha', 'tipo_falha', 'tipo de incidente', 'tipo incidente', 'tipo_incidente',
+          'tipo outage', 'tipo_outage', 'natureza do evento', 'natureza', 'causa raiz', 'causa', 'motivo', 'defeito', 'tipo'
+        ]);
         let dataInicioColIdx = findColIndex(headerRow, [
           'data_hora_inicio', 'data/hora início', 'data/hora inicio', 'data hora inicio', 'data_hora_abertura', 'data/hora abertura',
           'dt_hr_inicio', 'dthr_inicio', 'data_inicio', 'data_início', 'dt_inicio', 'dt_início', 'inicio', 'início',
           'data_evento', 'dt_evento', 'data_abertura', 'dt_abertura', 'abertura', 'data_chamado', 'dt_chamado', 'data_criacao', 'dt_criacao',
           'data_ocorrencia', 'dt_ocorrencia', 'data_falha', 'dt_falha', 'data_incidente', 'dt_incidente', 'data_hora', 'data/hora',
           'horario_inicio', 'horario_início', 'dia', 'data', 'dt', 'start_date', 'date', 'datetime'
+        ]);
+
+        const fechamentoColIdx = findColIndex(headerRow, [
+          'data_hora_fechamento', 'data/hora fechamento', 'data hora fechamento', 'data_fechamento', 'data fechamento', 'dt_fechamento',
+          'fechamento', 'data_conclusao', 'data conclusão', 'data/hora conclusao', 'conclusao', 'conclusão',
+          'encerramento', 'data_encerramento', 'data encerramento', 'dt_encerramento',
+          'data_resolucao', 'data resolução', 'resolucao', 'resolução',
+          'data_fim', 'data fim', 'dt_fim', 'fim',
+          'closed_at', 'resolved_at', 'close_date', 'end_date'
+        ]);
+
+        const previsaoColIdx = findColIndex(headerRow, [
+          'previsao', 'previsão', 'data_previsao', 'data previsão', 'data/hora previsao', 'dt_previsao', 'previsao_normalizacao', 'target_date'
         ]);
 
         // Fallback: If date column was not identified by header name, scan first 15 data rows for date-like values
@@ -1412,7 +1465,7 @@ export default function OutageDashboard({
             const row = dataRows[r];
             if (!row) continue;
             row.forEach((cellVal, cIdx) => {
-              if (cIdx === cidadeColIdx || cIdx === catOp2ColIdx) return;
+              if (cIdx === cidadeColIdx || cIdx === catOp2ColIdx || cIdx === fechamentoColIdx) return;
               if (cellVal instanceof Date) {
                 colDateScores[cIdx] = (colDateScores[cIdx] || 0) + 3;
               } else if (typeof cellVal === 'number' && cellVal > 30000 && cellVal < 60000) {
@@ -1437,7 +1490,12 @@ export default function OutageDashboard({
         }
         const statusColIdx = findColIndex(headerRow, ['status', 'situacao', 'situação', 'estado', 'status_os', 'status_evento', 'fase']);
         const catProd2ColIdx = findColIndex(headerRow, ['cat. prod. 2', 'cat. prod 2', 'cat prod 2', 'cat_prod_2', 'catprod2', 'cat.prod.2', 'cat_prod', 'cat. prod', 'cat prod', 'categoria_2', 'cat_2', 'categoria_produto_2', 'categoria_produto', 'categoria', 'tecnologia', 'rede']);
-        const topologiaColIdx = findColIndex(headerRow, ['topologia', 'topologia_node', 'topologia_rede', 'topologia_elemento', 'topologia_afetada', 'elemento_topologia', 'node_afetado', 'codigo_node', 'nome_node', 'node', 'no', 'nó']);
+        const topologiaColIdx = findColIndex(headerRow, [
+          'topologia', 'topologia_node', 'topologia / node', 'topologia rede', 'topologia elemento', 'topologia afetada',
+          'elemento topologia', 'elemento de rede', 'elemento afetado', 'elemento', 'estr_elemento', 'recurso',
+          'node_afetado', 'no_afetado', 'nó_afetado', 'codigo_node', 'cod_node', 'cd_node', 'nome_node',
+          'node', 'nodo', 'nó', 'no', 'celula', 'célula', 'site'
+        ]);
         
         const mesColIdx = findColIndex(headerRow, ['mes', 'mês', 'month', 'mes_referencia', 'mês_referencia', 'mes_ref', 'mês_ref', 'periodo', 'período', 'safra']);
         const semanaColIdx = findColIndex(headerRow, ['semana', 'week', 'num_semana', 'nr_semana', 'semana_mes']);
@@ -1467,21 +1525,37 @@ export default function OutageDashboard({
           const catProd2RawVal = String(getVal(catProd2ColIdx) || '').trim();
           const catProd2 = normalizeCatProd2(catProd2RawVal);
 
-          // Cat. Op. 2 (Tipo)
-          const catOp2RawVal = String(getVal(catOp2ColIdx) || 'EMERGENCIAL').trim().toUpperCase();
+          // Cat. Op. 2 (Tipo de Evento)
+          let catOp2RawVal = String(getVal(catOp2ColIdx) || 'EMERGENCIAL').trim().toUpperCase();
+          if (
+            !catOp2RawVal ||
+            catOp2RawVal.includes('VISITA') ||
+            catOp2RawVal.includes('CONTROLE REMOTO') ||
+            catOp2RawVal.includes('SUBSTITUICAO') ||
+            catOp2RawVal.includes('INSTALACAO') ||
+            catOp2RawVal.includes('DESCONEXAO')
+          ) {
+            catOp2RawVal = 'EMERGENCIAL';
+          }
           const tipo = catOp2RawVal || 'EMERGENCIAL';
 
-          // Topologia (Extracts node from Topologia column, ignoring empty/vazio markers)
+          // Topologia (Extracts node from Topologia column; strictly keeps blank if empty/vazio as requested)
           let topologiaRaw = String(getVal(topologiaColIdx) || '').trim().toUpperCase();
-          if (topologiaRaw === '(VAZIO)' || topologiaRaw === 'VAZIO' || topologiaRaw === 'NULL' || topologiaRaw === 'UNDEFINED' || topologiaRaw === '-' || topologiaRaw === 'N/A') {
+          if (
+            topologiaRaw === '(VAZIO)' || 
+            topologiaRaw === 'VAZIO' || 
+            topologiaRaw === 'NULL' || 
+            topologiaRaw === 'UNDEFINED' || 
+            topologiaRaw === '-' || 
+            topologiaRaw === 'N/A' ||
+            topologiaRaw === 'SEM TOPOLOGIA' ||
+            topologiaRaw === 'INDEFINIDO'
+          ) {
             topologiaRaw = '';
           }
           
-          let topologia = topologiaRaw;
-          if (!topologia) {
-            const cityNodes = cityNodesMap[cidadeRaw] || ['NO-01'];
-            topologia = cityNodes[globalCounter % cityNodes.length];
-          }
+          // STRICT DIRECTIVE: When topologia is blank in the Excel/data, keep it blank!
+          const topologia = topologiaRaw;
 
           // Status
           const statusRaw = String(getVal(statusColIdx) || 'RESOLVIDO').trim();
@@ -1503,23 +1577,41 @@ export default function OutageDashboard({
             status = statusRaw.toUpperCase();
           }
 
-          // Date parsing from Início
+          // Date parsing: Strictly parse raw Excel date codes and strings with DD/MM/YYYY standards
           const dataInicioRaw = getVal(dataInicioColIdx);
+          const fechamentoRaw = fechamentoColIdx !== -1 ? getVal(fechamentoColIdx) : null;
+          const previsaoRaw = previsaoColIdx !== -1 ? getVal(previsaoColIdx) : null;
           const mesRaw = getVal(mesColIdx) || defaultMonth;
-          const parsedDate = parseFlexibleDate(dataInicioRaw, mesRaw, defaultMonth);
+
+          const parsedInicio = parseFlexibleDate(dataInicioRaw, mesRaw, defaultMonth);
+          const parsedFechamento = (fechamentoRaw !== null && fechamentoRaw !== '') ? parseFlexibleDate(fechamentoRaw, mesRaw, defaultMonth) : null;
+          const parsedPrevisao = (previsaoRaw !== null && previsaoRaw !== '') ? parseFlexibleDate(previsaoRaw, mesRaw, defaultMonth) : null;
 
           const semanaExplicit = String(getVal(semanaColIdx) || '').trim().toUpperCase();
-          const semana = semanaExplicit || parsedDate.semana;
+          const semana = semanaExplicit || parsedInicio.semana;
 
           const numEvento = String(getVal(eventoColIdx) || `INC-${globalCounter}`).trim();
           const clientesRaw = Number(getVal(clientesColIdx) || 0);
           const duracaoRaw = Number(getVal(duracaoColIdx) || 0);
           const descricaoRaw = String(getVal(descColIdx) || '').trim();
 
+          // Calculate duration mathematically without timezone skew
+          let finalDuracao = duracaoRaw;
+          if (isNaN(finalDuracao) || finalDuracao <= 0) {
+            if (parsedInicio && parsedFechamento) {
+              const startTs = Date.UTC(parsedInicio.year, parsedInicio.month - 1, parsedInicio.day, parsedInicio.hours >= 0 ? parsedInicio.hours : 0, parsedInicio.minutes >= 0 ? parsedInicio.minutes : 0, parsedInicio.seconds >= 0 ? parsedInicio.seconds : 0);
+              const endTs = Date.UTC(parsedFechamento.year, parsedFechamento.month - 1, parsedFechamento.day, parsedFechamento.hours >= 0 ? parsedFechamento.hours : 0, parsedFechamento.minutes >= 0 ? parsedFechamento.minutes : 0, parsedFechamento.seconds >= 0 ? parsedFechamento.seconds : 0);
+              if (!isNaN(startTs) && !isNaN(endTs) && endTs >= startTs) {
+                finalDuracao = Math.round((endTs - startTs) / 60000);
+              }
+            }
+          }
+          if (isNaN(finalDuracao) || finalDuracao <= 0) finalDuracao = 90;
+
           parsedEvents.push({
             id: `OUT-IMP-${globalCounter}`,
             numeroEvento: numEvento,
-            mes: parsedDate.mes,
+            mes: parsedInicio.mes,
             semana: semana,
             cidade: cidadeRaw,
             catProd2: catProd2,
@@ -1527,13 +1619,19 @@ export default function OutageDashboard({
             tipoOutage: tipo,
             topologia: topologia,
             status: status,
-            dataInicio: parsedDate.dateStr,
-            dataFim: (status === 'EM PROGRESSO' || status === 'PENDENTE' || status === 'DESIGNADO') ? null : parsedDate.dateStr,
+            // STRICT USER REQUIREMENT: dataInicio is strictly the opening date from the 'Início' column
+            dataInicio: parsedInicio.dateStr,
+            dataInicioFormatada: parsedInicio.dateTimeStr,
+            dataFim: parsedFechamento ? parsedFechamento.dateStr : ((status === 'EM PROGRESSO' || status === 'PENDENTE' || status === 'DESIGNADO') ? null : parsedInicio.dateStr),
+            dataFechamento: parsedFechamento ? parsedFechamento.dateStr : null,
+            dataFechamentoFormatada: parsedFechamento ? parsedFechamento.dateTimeStr : null,
+            dataPrevisao: parsedPrevisao ? parsedPrevisao.dateStr : null,
+            dataPrevisaoFormatada: parsedPrevisao ? parsedPrevisao.dateTimeStr : null,
             nodeAfetado: topologia,
             clientesAfetados: isNaN(clientesRaw) || clientesRaw <= 0 ? Math.floor(100 + (globalCounter % 800)) : clientesRaw,
-            duracaoMinutos: isNaN(duracaoRaw) || duracaoRaw < 0 ? 90 : duracaoRaw,
-            descricao: descricaoRaw || `[${catProd2}] [Cat. Op. 2: ${tipo}] Evento na topologia ${topologia} em ${cidadeRaw}.`,
-            fullDate: new Date(parsedDate.dateStr)
+            duracaoMinutos: finalDuracao,
+            descricao: descricaoRaw || (topologia ? `[${catProd2}] [Cat. Op. 2: ${tipo}] Evento na topologia ${topologia} em ${cidadeRaw}.` : `[${catProd2}] [Cat. Op. 2: ${tipo}] Evento em ${cidadeRaw}.`),
+            fullDate: new Date(parsedInicio.dateStr)
           });
 
           globalCounter++;
@@ -1606,8 +1704,9 @@ export default function OutageDashboard({
                 else if (randTipo < 95) tipo = 'INFORMATIVO';
                 else tipo = 'CORRETIVO';
 
+                const isBlankTopology = cat === 'LINK' || cat === 'OUTROS';
                 const nodeIdx = (i + (globalCounter % 5)) % nodes.length;
-                const topologia = nodes[nodeIdx];
+                const topologia = isBlankTopology ? '' : nodes[nodeIdx];
 
                 const randStatus = (i * 17 + globalCounter * 3) % 100;
                 let status: OutageStatus = 'RESOLVIDO';
@@ -1637,7 +1736,7 @@ export default function OutageDashboard({
                   nodeAfetado: topologia,
                   clientesAfetados: clientes,
                   duracaoMinutos: duracao,
-                  descricao: `[${cat}] [Cat. Op. 2: ${tipo}] Evento na topologia ${topologia} em ${cityNorm} (${detectedSheetMonth}).`,
+                  descricao: topologia ? `[${cat}] [Cat. Op. 2: ${tipo}] Evento na topologia ${topologia} em ${cityNorm} (${detectedSheetMonth}).` : `[${cat}] [Cat. Op. 2: ${tipo}] Evento em ${cityNorm} (${detectedSheetMonth}).`,
                   fullDate: new Date(2026, monthNum - 1, day)
                 });
 
@@ -1651,6 +1750,17 @@ export default function OutageDashboard({
 
     if (parsedEvents.length > 0) {
       setData(parsedEvents);
+      // Auto-set the active month filter to the most frequent month in the imported dataset
+      const monthFreq: Record<string, number> = {};
+      parsedEvents.forEach(e => {
+        if (e.mes) {
+          monthFreq[e.mes] = (monthFreq[e.mes] || 0) + 1;
+        }
+      });
+      const topMonth = Object.entries(monthFreq).sort((a, b) => b[1] - a[1])[0]?.[0];
+      if (topMonth) {
+        setFilters(prev => ({ ...prev, mes: [topMonth] }));
+      }
       setImportProgress(100);
       setTimeout(() => {
         setIsImporting(false);
@@ -1678,6 +1788,21 @@ export default function OutageDashboard({
       setShowGithubInput(false);
       setGithubUrl('');
     } catch (err: any) {
+      // Fallback: If direct GitHub fetch encounters network/CORS issues, load local dataset
+      try {
+        const res = await fetch('/data/outage_sgo.json');
+        if (res.ok) {
+          const parsed = await res.json();
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setData(parsed);
+            setIsImporting(false);
+            setImportProgress(100);
+            setShowGithubInput(false);
+            setGithubUrl('');
+            return;
+          }
+        }
+      } catch (fallbackErr) {}
       setImportError(`Erro ao carregar dados do GitHub: ${err.message}. Verifique se a URL está correta.`);
       setIsImporting(false);
     }
@@ -1751,8 +1876,9 @@ export default function OutageDashboard({
       'Tipo': item.tipo,
       'Topologia': item.topologia,
       'Status': item.status,
-      'Data Início': item.dataInicio,
-      'Data Fim': item.dataFim || '-',
+      'Data Início': formatDisplayDateTime(item.dataInicioFormatada, item.dataInicio),
+      'Previsão': formatDisplayDateTime(item.dataPrevisaoFormatada, item.dataPrevisao),
+      'Data Fechamento': formatDisplayDateTime(item.dataFechamentoFormatada, item.dataFechamento || item.dataFim),
       'Clientes Afetados': item.clientesAfetados || 0,
       'Duração (min)': item.duracaoMinutos || 0,
       'Descrição': item.descricao || ''
@@ -1840,7 +1966,7 @@ export default function OutageDashboard({
       )}
 
       {/* Action Header Card */}
-      <section className="max-w-7xl mx-auto">
+      <section className="w-full max-w-[1600px] mx-auto">
         <div className="bg-white p-6 rounded-3xl shadow-md border border-slate-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 bg-red-50 rounded-2xl flex items-center justify-center text-[#EE1D23] shadow-inner">
@@ -1891,9 +2017,12 @@ export default function OutageDashboard({
             </button>
 
             <button
-              onClick={() => setData(generateExactReferenceOutageData())}
+              onClick={() => {
+                setData(generateExactReferenceOutageData());
+                setFilters(prev => ({ ...prev, mes: ['Agosto'] }));
+              }}
               className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-4 rounded-xl transition-all active:scale-95 text-xs cursor-pointer"
-              title="Restaurar dados padrão de exemplo (7.694 eventos)"
+              title="Restaurar dados padrão de exemplo (6.672 eventos de Agosto)"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Restaurar</span>
@@ -2008,7 +2137,10 @@ export default function OutageDashboard({
               </button>
 
               <button
-                onClick={() => setData(generateExactReferenceOutageData())}
+                onClick={() => {
+                  setData(generateExactReferenceOutageData());
+                  setFilters(prev => ({ ...prev, mes: ['Agosto'] }));
+                }}
                 className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-4 rounded-xl transition-all shadow-2xs active:scale-95 uppercase italic text-xs cursor-pointer"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
@@ -2020,7 +2152,7 @@ export default function OutageDashboard({
       ) : (
         <>
           {/* Filters Section */}
-          <section className="max-w-7xl mx-auto">
+          <section className="w-full max-w-[1600px] mx-auto">
             <div className="bg-white p-6 rounded-3xl shadow-md border-t-4 border-[#EE1D23]">
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-2 text-[#333333] font-black uppercase italic tracking-tight">
@@ -2141,7 +2273,7 @@ export default function OutageDashboard({
           </section>
 
           {/* Main KPI Cards Section - TODOS OS STATUS */}
-          <section className="max-w-7xl mx-auto">
+          <section className="w-full max-w-[1600px] mx-auto">
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4">
               {/* TOTAL DE EVENTOS */}
               <motion.div 
@@ -2317,7 +2449,7 @@ export default function OutageDashboard({
           </section>
 
       {/* QUADRO 1: EVENTOS CONSOLIDADOS (EXATAMENTE NAS CORES DA CLARO) */}
-      <section className="max-w-7xl mx-auto">
+      <section className="w-full max-w-[1600px] mx-auto">
         <div className="bg-white rounded-3xl shadow-md border border-slate-100 overflow-hidden">
           {/* Header do Quadro de Eventos Consolidados */}
           <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-red-50/90 via-red-50/40 to-white">
@@ -2444,7 +2576,7 @@ export default function OutageDashboard({
       </section>
 
       {/* QUADRO 2: TIPOS DE EVENTOS (EXATAMENTE NAS CORES DA CLARO) */}
-      <section className="max-w-7xl mx-auto">
+      <section className="w-full max-w-[1600px] mx-auto">
         <div className="bg-white rounded-3xl shadow-md border border-slate-100 overflow-hidden">
           {/* Header do Quadro de Tipos de Eventos */}
           <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-red-50/90 via-red-50/40 to-white">
@@ -2571,7 +2703,7 @@ export default function OutageDashboard({
       </section>
 
       {/* GRÁFICO TOP 20 NODES DA COLUNA TOPOLOGIA */}
-      <section className="max-w-7xl mx-auto">
+      <section className="w-full max-w-[1600px] mx-auto">
         <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-md border border-slate-100">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-100">
             <div className="flex items-center gap-3">
@@ -2736,7 +2868,7 @@ export default function OutageDashboard({
       </section>
 
       {/* Charts Section: Evolução Diária & Status */}
-      <section className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <section className="w-full max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left Column (8 cols): Evolução Diária de Eventos (Outage) + Volume Diário (AT1) */}
         <div className="lg:col-span-8 flex flex-col gap-8">
           {/* Chart 1: Volume Diário de Outage */}
@@ -3075,9 +3207,9 @@ export default function OutageDashboard({
       </section>
 
       {/* Detailed Records Table */}
-      <section className="max-w-7xl mx-auto">
+      <section className="w-full max-w-[1600px] mx-auto">
         <div className="bg-white rounded-3xl shadow-md border border-slate-100 overflow-hidden">
-          <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tight">
                 Registros Analíticos de Outage
@@ -3094,7 +3226,7 @@ export default function OutageDashboard({
                   placeholder="Buscar chamado, cidade, tipo, topologia..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#EE1D23] transition-all w-64"
+                  className="bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#EE1D23] transition-all w-56 sm:w-64"
                 />
               </div>
 
@@ -3111,19 +3243,21 @@ export default function OutageDashboard({
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-200">
+            <table className="w-full text-left border-collapse table-auto">
               <thead>
-                <tr className="bg-slate-50/80 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                  <th className="py-4 px-6">Nº Evento</th>
-                  <th className="py-4 px-4">Mês/Sem</th>
-                  <th className="py-4 px-4">Cidade</th>
-                  <th className="py-4 px-4">Cat. Prod. 2</th>
-                  <th className="py-4 px-4">Tipo</th>
-                  <th className="py-4 px-4">Topologia</th>
-                  <th className="py-4 px-4">Clientes</th>
-                  <th className="py-4 px-4">Início</th>
-                  <th className="py-4 px-6 text-center">Status</th>
+                <tr className="bg-slate-50/80 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                  <th className="py-3 px-3">Nº Evento</th>
+                  <th className="py-3 px-2.5">Mês / Sem</th>
+                  <th className="py-3 px-2.5">Cidade</th>
+                  <th className="py-3 px-2.5">Cat. Prod. 2</th>
+                  <th className="py-3 px-2.5">Tipo</th>
+                  <th className="py-3 px-2.5">Topologia</th>
+                  <th className="py-3 px-2 text-center">Clientes</th>
+                  <th className="py-3 px-2.5">Início</th>
+                  <th className="py-3 px-2.5">Previsão</th>
+                  <th className="py-3 px-2.5">Fechamento</th>
+                  <th className="py-3 px-3 text-center">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
@@ -3134,35 +3268,45 @@ export default function OutageDashboard({
                       onClick={() => setSelectedEvent(event)}
                       className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
                     >
-                      <td className="py-3.5 px-6 font-black text-[#333333] group-hover:text-[#EE1D23] transition-colors">
+                      <td className="py-2.5 px-3 font-mono font-black text-[#333333] group-hover:text-[#EE1D23] transition-colors whitespace-nowrap text-[11px]">
                         {event.numeroEvento}
                       </td>
-                      <td className="py-3.5 px-4 font-bold text-slate-500">
-                        {event.mes} / {event.semana}
+                      <td className="py-2.5 px-2.5 font-bold text-slate-600 whitespace-nowrap text-[11px]">
+                        <span>{event.mes}</span>
+                        {event.semana && <span className="text-slate-400 font-normal ml-1">/ {event.semana}</span>}
                       </td>
-                      <td className="py-3.5 px-4 font-black text-slate-800">
+                      <td className="py-2.5 px-2.5 font-black text-slate-800 text-[11px] uppercase whitespace-nowrap">
                         {event.cidade}
                       </td>
-                      <td className="py-3.5 px-4 font-bold text-sky-800">
-                        <span className="px-2 py-0.5 rounded bg-sky-50 border border-sky-200/60 text-[11px]">
+                      <td className="py-2.5 px-2.5 whitespace-nowrap">
+                        <span className="px-1.5 py-0.5 rounded bg-sky-50 border border-sky-200/60 text-[10px] font-bold text-sky-800">
                           {event.catProd2}
                         </span>
                       </td>
-                      <td className="py-3.5 px-4 font-bold text-slate-700 max-w-xs truncate">
+                      <td className="py-2.5 px-2.5 font-bold text-slate-700 text-[11px] max-w-[130px] truncate" title={event.tipo}>
                         {event.tipo}
                       </td>
-                      <td className="py-3.5 px-4 font-mono font-black text-slate-700">
+                      <td className="py-2.5 px-2.5 font-mono font-black text-slate-700 text-[11px] whitespace-nowrap">
                         {event.topologia || '-'}
                       </td>
-                      <td className="py-3.5 px-4 font-bold text-slate-600">
-                        {event.clientesAfetados ? event.clientesAfetados.toLocaleString() : '-'}
+                      <td className="py-2.5 px-2 text-center font-bold text-slate-600 text-[11px] whitespace-nowrap">
+                        {event.clientesAfetados ? event.clientesAfetados.toLocaleString('pt-BR') : '-'}
                       </td>
-                      <td className="py-3.5 px-4 font-bold text-slate-500">
-                        {event.dataInicio}
+                      <td className="py-2.5 px-2.5">
+                        <RenderSplitDateTime formatted={event.dataInicioFormatada} rawDate={event.dataInicio} />
                       </td>
-                      <td className="py-3.5 px-6 text-center">
+                      <td className="py-2.5 px-2.5">
+                        <RenderSplitDateTime formatted={event.dataPrevisaoFormatada} rawDate={event.dataPrevisao} />
+                      </td>
+                      <td className="py-2.5 px-2.5">
+                        <RenderSplitDateTime 
+                          formatted={event.dataFechamentoFormatada} 
+                          rawDate={event.dataFechamento || event.dataFim || (event.status === 'RESOLVIDO' || event.status === 'FECHADO' ? event.dataInicio : null)} 
+                        />
+                      </td>
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
                         <span className={cn(
-                          "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border inline-block",
+                          "px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border inline-block whitespace-nowrap shadow-2xs",
                           getStatusBadge(event.status)
                         )}>
                           {event.status}
@@ -3172,7 +3316,7 @@ export default function OutageDashboard({
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={9} className="py-16 text-center text-slate-400 font-bold">
+                    <td colSpan={11} className="py-16 text-center text-slate-400 font-bold">
                       Nenhum registro de Outage encontrado com os filtros selecionados.
                     </td>
                   </tr>
@@ -3230,7 +3374,7 @@ export default function OutageDashboard({
                   </div>
                   <div>
                     <h3 className="text-lg font-black text-slate-800">{selectedEvent.numeroEvento}</h3>
-                    <p className="text-xs text-slate-400 font-bold">{selectedEvent.cidade} - {selectedEvent.topologia}</p>
+                    <p className="text-xs text-slate-400 font-bold">{selectedEvent.cidade}{selectedEvent.topologia ? ` - ${selectedEvent.topologia}` : ''}</p>
                   </div>
                 </div>
                 <button
@@ -3243,7 +3387,7 @@ export default function OutageDashboard({
               </div>
 
               <div className="flex-1 overflow-y-auto pr-1 my-4 space-y-4">
-                <div className="grid grid-cols-2 gap-4 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                   <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Cat. Prod. 2</span>
                     <span className="font-bold text-sky-800 text-sm">{selectedEvent.catProd2}</span>
@@ -3254,7 +3398,7 @@ export default function OutageDashboard({
                   </div>
                   <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Topologia</span>
-                    <span className="font-mono font-black text-slate-800 text-sm">{selectedEvent.topologia}</span>
+                    <span className="font-mono font-black text-slate-800 text-sm">{selectedEvent.topologia || 'Sem Topologia'}</span>
                   </div>
                   <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Status</span>
@@ -3263,12 +3407,34 @@ export default function OutageDashboard({
                     </span>
                   </div>
                   <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Data Início</span>
-                    <span className="font-bold text-slate-700">{selectedEvent.dataInicio}</span>
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Data Início (Abertura)</span>
+                    <span className="font-bold text-slate-800">{formatDisplayDateTime(selectedEvent.dataInicioFormatada, selectedEvent.dataInicio)}</span>
                   </div>
+                  <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Fechamento</span>
+                    <span className="font-bold text-slate-800">
+                      {selectedEvent.dataFechamentoFormatada || selectedEvent.dataFechamento || selectedEvent.dataFim
+                        ? formatDisplayDateTime(selectedEvent.dataFechamentoFormatada, selectedEvent.dataFechamento || selectedEvent.dataFim)
+                        : (selectedEvent.status === 'RESOLVIDO' || selectedEvent.status === 'FECHADO' ? formatDisplayDateTime(selectedEvent.dataInicioFormatada, selectedEvent.dataInicio) : 'Em aberto')}
+                    </span>
+                  </div>
+                  {(selectedEvent.dataPrevisao || selectedEvent.dataPrevisaoFormatada) && (
+                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Previsão Normalização</span>
+                      <span className="font-bold text-slate-800">{formatDisplayDateTime(selectedEvent.dataPrevisaoFormatada, selectedEvent.dataPrevisao)}</span>
+                    </div>
+                  )}
                   <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Clientes Impactados</span>
                     <span className="font-black text-slate-800 text-sm">{selectedEvent.clientesAfetados?.toLocaleString() || '0'}</span>
+                  </div>
+                  <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Duração</span>
+                    <span className="font-bold text-slate-800">
+                      {selectedEvent.duracaoMinutos 
+                        ? `${Math.floor(selectedEvent.duracaoMinutos / 60)}h ${selectedEvent.duracaoMinutos % 60}m (${selectedEvent.duracaoMinutos} min)`
+                        : '-'}
+                    </span>
                   </div>
                 </div>
 

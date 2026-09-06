@@ -1,6 +1,6 @@
 {
   "name": "Dashboard de Visitas Técnicas e Mapa de Calor",
-  "description": "Painel de acompanhamento de visitas técnicas com mapa de calor de nodes, filtros por cidade, tecnologia e indicadores de performance.",
+  "description": "Painel de acompanhamento de visitas técnicas com mapa de calor de nodes, filtros por cidade, tecnologia, Outages, AT5 e análise de Churn.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

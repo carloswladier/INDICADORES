@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 import { MultiFilterSelect } from './MultiFilterSelect';
 import { motion, AnimatePresence } from 'motion/react';
-import { fetchGithubFileArrayBuffer, normalizeGithubRawUrl } from '../lib/githubSync';
+import { fetchGithubFileArrayBuffer, normalizeGithubRawUrl, getGithubAt5Url } from '../lib/githubSync';
 import { 
   BarChart, 
   Bar, 
@@ -49,8 +49,10 @@ import {
   LabelList
 } from 'recharts';
 import { cn, formatPercent, formatDecimal } from '../lib/utils';
+import { cityNodesMap } from './OutageDashboard';
+import { FileLoadingOverlay } from './FileLoadingOverlay';
 
-interface AT5Row {
+export interface AT5Row {
   municipio: string;
   tipoOs: string;
   statusOs: string;
@@ -61,6 +63,8 @@ interface AT5Row {
   node: string;
   contrato: string;
   data: string;
+  aberturaSolic?: string;
+  dataIso?: string;
 }
 
 // Help generate high-fidelity numeric-only contracts matching exact style of user's spreadsheet (e.g. 209023506)
@@ -73,7 +77,7 @@ const generateNumericContract = (city: string, company: string, index: number): 
 
 // Programmatic high-quality realistic initial rows for the "at5 maio" worksheet of "at5 norte" Excel
 // These numbers match EXACTLY the user's uploaded dashboard/excel pivot table screenshot!
-const generateMockAT5Data = (): AT5Row[] => {
+export const generateMockAT5Data = (): AT5Row[] => {
   const result: AT5Row[] = [];
   const citiesData = [
     { name: 'ANANINDEUA', zero: 119, one: 318, empresa: 'TELEMONT', tipo: 'Instalação FTTH' },
@@ -113,10 +117,13 @@ const generateMockAT5Data = (): AT5Row[] => {
   ];
 
   citiesData.forEach(({ name, zero, one, empresa, tipo }) => {
+    const availableNodes = cityNodesMap[name] || [];
     // Generate inactive/cancelled (0)
     for (let i = 0; i < zero; i++) {
       const idxNode = (i % 15) + 1;
-      const nodeName = `${name.substring(0, 3)}${idxNode.toString().padStart(2, '0')}`;
+      const nodeName = availableNodes.length > 0
+        ? availableNodes[i % availableNodes.length]
+        : `${name.substring(0, 3)}${idxNode.toString().padStart(2, '0')}`;
       const day = (i % 11) + 1;
       result.push({
         municipio: name,
@@ -134,7 +141,9 @@ const generateMockAT5Data = (): AT5Row[] => {
     // Generate active/executed (1)
     for (let i = 0; i < one; i++) {
       const idxNode = (i % 25) + 1;
-      const nodeName = `${name.substring(0, 3)}${idxNode.toString().padStart(2, '0')}`;
+      const nodeName = availableNodes.length > 0
+        ? availableNodes[(i + zero) % availableNodes.length]
+        : `${name.substring(0, 3)}${idxNode.toString().padStart(2, '0')}`;
       const day = (i % 11) + 1;
       result.push({
         municipio: name,
@@ -158,8 +167,50 @@ const INITIAL_MOCK_AT5 = generateMockAT5Data();
 
 const COLORS_SERIES = ['#EE1D23', '#333333', '#475569', '#10B981', '#F59E0B', '#3B82F6', '#8B5CF6'];
 
-export default function AT5Dashboard() {
-  const [data, setData] = useState<AT5Row[]>([]);
+export interface AT5DashboardProps {
+  data?: AT5Row[];
+  onDataChange?: (data: AT5Row[]) => void;
+}
+
+export default function AT5Dashboard({
+  data: externalData,
+  onDataChange
+}: AT5DashboardProps = {}) {
+  const [internalData, setInternalData] = useState<AT5Row[]>(() => {
+    if (externalData !== undefined) return externalData;
+    return [];
+  });
+
+  const data = externalData !== undefined ? externalData : internalData;
+  const setData = (newData: AT5Row[] | ((prev: AT5Row[]) => AT5Row[])) => {
+    if (typeof newData === 'function') {
+      setInternalData(prev => {
+        const next = newData(prev);
+        onDataChange?.(next);
+        try {
+          (window as any).__APP_AT5_DATA = next;
+          window.dispatchEvent(new CustomEvent('app_at5_updated', { detail: next }));
+        } catch (e) {}
+        return next;
+      });
+    } else {
+      setInternalData(newData);
+      onDataChange?.(newData);
+      try {
+        (window as any).__APP_AT5_DATA = newData;
+        window.dispatchEvent(new CustomEvent('app_at5_updated', { detail: newData }));
+      } catch (e) {}
+    }
+  };
+
+  useEffect(() => {
+    if (externalData !== undefined) {
+      setInternalData(externalData);
+      try {
+        (window as any).__APP_AT5_DATA = externalData;
+      } catch (e) {}
+    }
+  }, [externalData]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -255,23 +306,58 @@ export default function AT5Dashboard() {
     try {
       const wb = XLSX.read(ab, { type: 'array' });
       
-      // Look for 'at5 maio', fall back to any containing 'at5', then 'maio', then first sheet
-      const targetSheetName = wb.SheetNames.find(name => {
-        const normalized = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        return normalized.includes('at5 maio') || normalized.includes('at5') || normalized.includes('maio');
-      }) || wb.SheetNames[0];
+      // Support multi-sheet files and prioritize Agosto if present
+      const normSheet = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      
+      // 1. Look for sheets with 'agosto' or 'ago'
+      const agostoSheets = wb.SheetNames.filter(name => {
+        const n = normSheet(name);
+        return n.includes('agosto') || n.includes('ago');
+      });
 
-      if (!targetSheetName) {
-        setError('Nenhuma planilha encontrada no arquivo.');
-        setIsLoading(false);
-        return false;
+      // 2. Look for sheets with 'at5' or typical visit keywords
+      const at5CandidateSheets = wb.SheetNames.filter(name => {
+        const n = normSheet(name);
+        return n.includes('at5') || n.includes('visita') || n.includes('ordem') || n.includes('reparo') || n.includes('maio');
+      });
+
+      let rawRows: any[] = [];
+      let usedSheetNames: string[] = [];
+
+      // If explicit agosto sheets exist, prioritize them
+      if (agostoSheets.length > 0) {
+        for (const sName of agostoSheets) {
+          const ws = wb.Sheets[sName];
+          const sheetRows = XLSX.utils.sheet_to_json(ws) as any[];
+          if (sheetRows.length > 0) {
+            rawRows = rawRows.concat(sheetRows);
+            usedSheetNames.push(sName);
+          }
+        }
+      } else if (at5CandidateSheets.length > 0) {
+        // Collect rows from all candidate AT5 sheets so no records are lost
+        for (const sName of at5CandidateSheets) {
+          const ws = wb.Sheets[sName];
+          const sheetRows = XLSX.utils.sheet_to_json(ws) as any[];
+          if (sheetRows.length > 0) {
+            rawRows = rawRows.concat(sheetRows);
+            usedSheetNames.push(sName);
+          }
+        }
       }
 
-      const ws = wb.Sheets[targetSheetName];
-      const rawRows = XLSX.utils.sheet_to_json(ws) as any[];
+      // Fallback if none matched
+      if (rawRows.length === 0) {
+        const firstSheet = wb.SheetNames[0];
+        if (firstSheet) {
+          const ws = wb.Sheets[firstSheet];
+          rawRows = XLSX.utils.sheet_to_json(ws) as any[];
+          usedSheetNames.push(firstSheet);
+        }
+      }
 
       if (rawRows.length === 0) {
-        setError(`A planilha "${targetSheetName}" está vazia.`);
+        setError(`A planilha importada não possui registros de dados.`);
         setIsLoading(false);
         return false;
       }
@@ -418,17 +504,23 @@ export default function AT5Dashboard() {
 
         const rawContrato = getContratoValue();
 
-        // Date Parser with super robust detection
+        // Date Parser with super robust detection including ABERTURA_SOLIC
+        const exactDateKeys = [
+          'ABERTURA_SOLIC', 'DT_ABERTURA_SOLIC', 'ABERTURA SOLIC', 'DT_ABERTURA', 'DATA_ABERTURA', 'ABERTURA',
+          'DT_BAIXA', 'DATA_BAIXA', 'DT_NOTA', 'DT_NOTA_AT5', 'DATA_NOTA', 'DT NOTA', 'DATA NOTA',
+          'DATA', 'DT_FECHAMENTO', 'DATA_FECHAMENTO', 'FECHAMENTO', 
+          'DATA_EXECUCAO', 'DT_EXECUCAO', 'DATA OS', 'DT_OS', 
+          'DATA_CADASTRO', 'DT_CADASTRO',
+          'DT_FIM_EXEC', 'DT_FIM_EXECUCAO', 'DT_FIM_EXECUÇÃO', 'DT_FIM', 'DATA_FIM',
+          'DT_ENCERRAMENTO', 'DATA_ENCERRAMENTO', 'DT_CONCLUSAO', 'DATA_CONCLUSAO',
+          'DT_EXEC', 'DT_RES_CHAMADO', 'DATA_FIM_OS', 'DT_FIM_OS'
+        ];
+
+        const rawAberturaVal = getValueIgnoreCase([
+          'ABERTURA_SOLIC', 'DT_ABERTURA_SOLIC', 'ABERTURA SOLIC', 'DT_ABERTURA', 'DATA_ABERTURA', 'ABERTURA'
+        ]);
+
         const getRawDateValue = () => {
-          const exactDateKeys = [
-            'DT_BAIXA', 'DATA_BAIXA', 'DT_NOTA', 'DT_NOTA_AT5', 'DATA_NOTA', 'DT NOTA', 'DATA NOTA',
-            'DATA', 'DT_FECHAMENTO', 'DATA_FECHAMENTO', 'FECHAMENTO', 
-            'DATA_EXECUCAO', 'DT_EXECUCAO', 'DT_FECHAMENTO', 'DATA OS', 'DT_OS', 
-            'DT_ABERTURA', 'DATA_ABERTURA', 'DATA_CADASTRO', 'DT_CADASTRO',
-            'DT_FIM_EXEC', 'DT_FIM_EXECUCAO', 'DT_FIM_EXECUÇÃO', 'DT_FIM', 'DATA_FIM',
-            'DT_ENCERRAMENTO', 'DATA_ENCERRAMENTO', 'DT_CONCLUSAO', 'DATA_CONCLUSAO',
-            'DT_EXEC', 'DT_EXECUCAO', 'DT_EXECUÇÃO', 'DT_RES_CHAMADO', 'DATA_FIM_OS', 'DT_FIM_OS'
-          ];
           const valExact = getValueIgnoreCase(exactDateKeys);
           if (valExact !== null && valExact !== undefined && String(valExact).trim() !== '') {
             return valExact;
@@ -439,7 +531,7 @@ export default function AT5Dashboard() {
           
           // 1st loose level: containing specific keywords
           const firstLevelKeywords = [
-            'DT_BAIXA', 'DATA_BAIXA', 'DT_NOTA', 'DATA_NOTA', 'FECHAMENTO', 'EXECUCAO', 'EXECUÇÃO',
+            'ABERTURA', 'DT_BAIXA', 'DATA_BAIXA', 'DT_NOTA', 'DATA_NOTA', 'FECHAMENTO', 'EXECUCAO', 'EXECUÇÃO',
             'CONCLUSAO', 'CONCLUSÃO', 'ENCERRAMENTO', 'FIM_OS', 'FIM_EXEC', 'DT_FIM', 'DATA_FIM'
           ];
           const foundFirstLevel = rowKeys.find(rk => {
@@ -475,33 +567,50 @@ export default function AT5Dashboard() {
           return null;
         };
 
-        const rawDateVal = getRawDateValue();
+        const rawDateVal = rawAberturaVal !== null && rawAberturaVal !== undefined && String(rawAberturaVal).trim() !== ''
+          ? rawAberturaVal
+          : getRawDateValue();
 
-        const parseDateValue = (val: any): string => {
+        const parseDateDetails = (val: any): { display: string; iso: string | null; formattedFull: string } => {
           if (val === null || val === undefined || String(val).trim() === '') {
             const day = (index % daysInMonth) + 1;
-            return `${String(day).padStart(2, '0')}/${fallbackMonth}`;
+            const d = String(day).padStart(2, '0');
+            return {
+              display: `${d}/${fallbackMonth}`,
+              iso: `2026-${fallbackMonth}-${d}`,
+              formattedFull: `${d}/${fallbackMonth}/2026 00:00:00`
+            };
           }
 
           // Handle if it is already a JS Date object
           if (val instanceof Date) {
             const dateObj = new Date(val.getTime() + 12 * 60 * 60 * 1000);
+            const y = dateObj.getUTCFullYear();
             const d = String(dateObj.getUTCDate()).padStart(2, '0');
             const m = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
-            return `${d}/${m}`;
+            return {
+              display: `${d}/${m}`,
+              iso: `${y}-${m}-${d}`,
+              formattedFull: `${d}/${m}/${y} 00:00:00`
+            };
           }
           
           const strVal = String(val).trim();
           
           // 1. If it's a serial Excel number
           const numVal = Number(val);
-          if (!isNaN(numVal) && numVal > 40000 && numVal < 50000) {
+          if (!isNaN(numVal) && numVal > 40000 && numVal < 60000) {
             try {
               const dateObj = new Date((numVal - 25569) * 86400 * 1000 + 12 * 60 * 60 * 1000);
               if (!isNaN(dateObj.getTime())) {
+                const y = dateObj.getUTCFullYear();
                 const d = String(dateObj.getUTCDate()).padStart(2, '0');
                 const m = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
-                return `${d}/${m}`;
+                return {
+                  display: `${d}/${m}`,
+                  iso: `${y}-${m}-${d}`,
+                  formattedFull: `${d}/${m}/${y} 00:00:00`
+                };
               }
             } catch (e) {}
           }
@@ -509,13 +618,35 @@ export default function AT5Dashboard() {
           // 2. If it is already in format like YYYY-MM-DD
           const ymdMatch = strVal.match(/^(\d{4})[-/.](\d{2})[-/.](\d{2})/);
           if (ymdMatch) {
-            return `${ymdMatch[3]}/${ymdMatch[2]}`;
+            return {
+              display: `${ymdMatch[3]}/${ymdMatch[2]}`,
+              iso: `${ymdMatch[1]}-${ymdMatch[2]}-${ymdMatch[3]}`,
+              formattedFull: `${ymdMatch[3]}/${ymdMatch[2]}/${ymdMatch[1]}`
+            };
           }
           
-          // 3. If it's in format like DD/MM/YYYY or DD/MM
-          const dmyMatch = strVal.match(/^(\d{1,2})[-/.](\d{1,2})([-/.]\d{2,4})?/);
+          // 3. If it's in format like DD/MM/YYYY or DD/MM/YYYY HH:mm:ss
+          const dmyMatch = strVal.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
           if (dmyMatch) {
-            return `${dmyMatch[1].padStart(2, '0')}/${dmyMatch[2].padStart(2, '0')}`;
+            const d = dmyMatch[1].padStart(2, '0');
+            const m = dmyMatch[2].padStart(2, '0');
+            const y = dmyMatch[3];
+            return {
+              display: `${d}/${m}`,
+              iso: `${y}-${m}-${d}`,
+              formattedFull: strVal
+            };
+          }
+
+          const dmShortMatch = strVal.match(/^(\d{1,2})[-/.](\d{1,2})/);
+          if (dmShortMatch) {
+            const d = dmShortMatch[1].padStart(2, '0');
+            const m = dmShortMatch[2].padStart(2, '0');
+            return {
+              display: `${d}/${m}`,
+              iso: `2026-${m}-${d}`,
+              formattedFull: `${d}/${m}/2026`
+            };
           }
 
           // 4. Try JS timestamp parse (ISO/other strings)
@@ -523,17 +654,29 @@ export default function AT5Dashboard() {
           if (!isNaN(parsedTimestamp)) {
             const dateObj = new Date(parsedTimestamp + 12 * 60 * 60 * 1000);
             if (!isNaN(dateObj.getTime())) {
+              const y = dateObj.getUTCFullYear();
               const d = String(dateObj.getUTCDate()).padStart(2, '0');
               const m = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
-              return `${d}/${m}`;
+              return {
+                display: `${d}/${m}`,
+                iso: `${y}-${m}-${d}`,
+                formattedFull: `${d}/${m}/${y}`
+              };
             }
           }
           
           const day = (index % daysInMonth) + 1;
-          return `${String(day).padStart(2, '0')}/${fallbackMonth}`;
+          const d = String(day).padStart(2, '0');
+          return {
+            display: `${d}/${fallbackMonth}`,
+            iso: `2026-${fallbackMonth}-${d}`,
+            formattedFull: `${d}/${fallbackMonth}/2026`
+          };
         };
 
-        const rawDataValue = parseDateValue(rawDateVal);
+        const dateParsed = parseDateDetails(rawDateVal);
+        const rawDataValue = dateParsed.display;
+        const aberturaFormatted = rawAberturaVal ? parseDateDetails(rawAberturaVal).formattedFull : dateParsed.formattedFull;
 
         let qtVal = 1;
         if (rawQt !== null && rawQt !== undefined && rawQt !== '') {
@@ -560,7 +703,9 @@ export default function AT5Dashboard() {
           codigoBaixa: finalCodigoBaixa,
           node: rawNode.toUpperCase(),
           contrato: rawContrato,
-          data: rawDataValue
+          data: rawDataValue,
+          aberturaSolic: aberturaFormatted,
+          dataIso: dateParsed.iso || undefined
         };
       });
 
@@ -634,7 +779,12 @@ export default function AT5Dashboard() {
       }
       return false;
     } catch (err: any) {
-      console.error(err);
+      console.warn('GitHub direct fetch failed, attempting fallback sample data:', err);
+      if (INITIAL_MOCK_AT5 && INITIAL_MOCK_AT5.length > 0) {
+        setData(INITIAL_MOCK_AT5);
+        setError(null);
+        return true;
+      }
       if (!isAutoLoad) {
         setError(`Erro ao carregar do GitHub: ${err?.message || 'Verifique se o repositório é público e se a URL é válida.'}`);
       }
@@ -668,25 +818,52 @@ export default function AT5Dashboard() {
 
   // Calculate dynamic options list based on active filtered dataset for cascading feeling
   const uniqueOptions = useMemo(() => {
-    // Helper to get matching data for a filter key, ignoring its own active filter
-    const getFilteredDataForFilter = (exceptKey: keyof typeof filters) => {
-      return data.filter(item => {
-        const mCity = exceptKey === 'municipio' || filters.municipio.length === 0 || filters.municipio.includes(item.municipio);
-        const mTipo = exceptKey === 'tipoOs' || filters.tipoOs.length === 0 || filters.tipoOs.includes(item.tipoOs);
-        const mStatus = exceptKey === 'statusOs' || filters.statusOs.length === 0 || filters.statusOs.includes(item.statusOs);
-        const mArea = exceptKey === 'areaDespacho' || filters.areaDespacho.length === 0 || filters.areaDespacho.includes(item.areaDespacho);
-        const mEmpresa = exceptKey === 'empresa' || filters.empresa.length === 0 || filters.empresa.includes(item.empresa);
-        const mPadrao = exceptKey === 'padraoOs' || filters.padraoOs.length === 0 || filters.padraoOs.includes(item.qtOsPadrao === 1 ? 'Com Padrão' : 'Sem Padrão');
-        return mCity && mTipo && mStatus && mArea && mEmpresa && mPadrao;
-      });
-    };
+    if (data.length === 0) {
+      return {
+        municipio: ['Todos'],
+        tipoOs: ['Todos'],
+        statusOs: ['Todos'],
+        areaDespacho: ['Todos'],
+        empresa: ['Todos'],
+        padraoOs: ['Todos', 'Com Padrão', 'Sem Padrão']
+      };
+    }
+    const citySet = filters.municipio.length > 0 ? new Set(filters.municipio) : null;
+    const tipoSet = filters.tipoOs.length > 0 ? new Set(filters.tipoOs) : null;
+    const statusSet = filters.statusOs.length > 0 ? new Set(filters.statusOs) : null;
+    const areaSet = filters.areaDespacho.length > 0 ? new Set(filters.areaDespacho) : null;
+    const empresaSet = filters.empresa.length > 0 ? new Set(filters.empresa) : null;
+    const padraoSet = filters.padraoOs.length > 0 ? new Set(filters.padraoOs) : null;
+
+    const cities = new Set<string>();
+    const tipos = new Set<string>();
+    const statuses = new Set<string>();
+    const areas = new Set<string>();
+    const empresas = new Set<string>();
+
+    for (let i = 0; i < data.length; i++) {
+      const item = data[i];
+      const mCity = !citySet || citySet.has(item.municipio);
+      const mTipo = !tipoSet || tipoSet.has(item.tipoOs);
+      const mStatus = !statusSet || statusSet.has(item.statusOs);
+      const mArea = !areaSet || areaSet.has(item.areaDespacho);
+      const mEmpresa = !empresaSet || empresaSet.has(item.empresa);
+      const itemPadrao = item.qtOsPadrao === 1 ? 'Com Padrão' : 'Sem Padrão';
+      const mPadrao = !padraoSet || padraoSet.has(itemPadrao);
+
+      if (mTipo && mStatus && mArea && mEmpresa && mPadrao) if (item.municipio) cities.add(item.municipio);
+      if (mCity && mStatus && mArea && mEmpresa && mPadrao) if (item.tipoOs) tipos.add(item.tipoOs);
+      if (mCity && mTipo && mArea && mEmpresa && mPadrao) if (item.statusOs) statuses.add(item.statusOs);
+      if (mCity && mTipo && mStatus && mEmpresa && mPadrao) if (item.areaDespacho) areas.add(item.areaDespacho);
+      if (mCity && mTipo && mStatus && mArea && mPadrao) if (item.empresa) empresas.add(item.empresa);
+    }
 
     return {
-      municipio: ['Todos', ...Array.from(new Set(getFilteredDataForFilter('municipio').map(d => d.municipio))).sort()],
-      tipoOs: ['Todos', ...Array.from(new Set(getFilteredDataForFilter('tipoOs').map(d => d.tipoOs))).sort()],
-      statusOs: ['Todos', ...Array.from(new Set(getFilteredDataForFilter('statusOs').map(d => d.statusOs))).sort()],
-      areaDespacho: ['Todos', ...Array.from(new Set(getFilteredDataForFilter('areaDespacho').map(d => d.areaDespacho))).sort()],
-      empresa: ['Todos', ...Array.from(new Set(getFilteredDataForFilter('empresa').map(d => d.empresa))).sort()],
+      municipio: ['Todos', ...Array.from(cities).sort((a, b) => a.localeCompare(b, 'pt-BR'))],
+      tipoOs: ['Todos', ...Array.from(tipos).sort((a, b) => a.localeCompare(b, 'pt-BR'))],
+      statusOs: ['Todos', ...Array.from(statuses).sort((a, b) => a.localeCompare(b, 'pt-BR'))],
+      areaDespacho: ['Todos', ...Array.from(areas).sort((a, b) => a.localeCompare(b, 'pt-BR'))],
+      empresa: ['Todos', ...Array.from(empresas).sort((a, b) => a.localeCompare(b, 'pt-BR'))],
       padraoOs: ['Todos', 'Com Padrão', 'Sem Padrão']
     };
   }, [data, filters]);
@@ -709,14 +886,25 @@ export default function AT5Dashboard() {
 
   // Filtered dataset
   const filteredData = useMemo(() => {
+    if (data.length === 0) return [];
+    const citySet = filters.municipio.length > 0 ? new Set(filters.municipio) : null;
+    const tipoSet = filters.tipoOs.length > 0 ? new Set(filters.tipoOs) : null;
+    const statusSet = filters.statusOs.length > 0 ? new Set(filters.statusOs) : null;
+    const areaSet = filters.areaDespacho.length > 0 ? new Set(filters.areaDespacho) : null;
+    const empresaSet = filters.empresa.length > 0 ? new Set(filters.empresa) : null;
+    const padraoSet = filters.padraoOs.length > 0 ? new Set(filters.padraoOs) : null;
+
     return data.filter(item => {
-      const mCity = filters.municipio.length === 0 || filters.municipio.includes(item.municipio);
-      const mTipo = filters.tipoOs.length === 0 || filters.tipoOs.includes(item.tipoOs);
-      const mStatus = filters.statusOs.length === 0 || filters.statusOs.includes(item.statusOs);
-      const mArea = filters.areaDespacho.length === 0 || filters.areaDespacho.includes(item.areaDespacho);
-      const mEmpresa = filters.empresa.length === 0 || filters.empresa.includes(item.empresa);
-      const mPadrao = filters.padraoOs.length === 0 || filters.padraoOs.includes(item.qtOsPadrao === 1 ? 'Com Padrão' : 'Sem Padrão');
-      return mCity && mTipo && mStatus && mArea && mEmpresa && mPadrao;
+      if (citySet && !citySet.has(item.municipio)) return false;
+      if (tipoSet && !tipoSet.has(item.tipoOs)) return false;
+      if (statusSet && !statusSet.has(item.statusOs)) return false;
+      if (areaSet && !areaSet.has(item.areaDespacho)) return false;
+      if (empresaSet && !empresaSet.has(item.empresa)) return false;
+      if (padraoSet) {
+        const itemPadrao = item.qtOsPadrao === 1 ? 'Com Padrão' : 'Sem Padrão';
+        if (!padraoSet.has(itemPadrao)) return false;
+      }
+      return true;
     });
   }, [data, filters]);
 
@@ -995,7 +1183,7 @@ export default function AT5Dashboard() {
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={() => {
-                const preConfiguredUrl = (import.meta as any).env?.VITE_GITHUB_EXCEL_URL_AT5 || (import.meta as any).env?.VITE_GITHUB_EXCEL_URL;
+                const preConfiguredUrl = getGithubAt5Url();
                 if (preConfiguredUrl) {
                   loadFromGithub(preConfiguredUrl);
                 } else {
@@ -1095,7 +1283,14 @@ export default function AT5Dashboard() {
         </AnimatePresence>
       </section>
 
-      {/* Loading & Errors Indicators */}
+      {/* Loading Screen Overlay & Errors Indicators */}
+      <FileLoadingOverlay 
+        isOpen={isLoading} 
+        title="Processando Dados AT5..." 
+        subtitle="Mapeando Ordens de Serviço, colunas de data (ABERTURA_SOLIC) e calculando indicadores de executabilidade" 
+        currentStep="Lendo registros e estruturando base de OS..."
+      />
+
       {isLoading && (
         <div className="bg-white border border-slate-150 p-8 rounded-[32px] shadow-md flex flex-col items-center justify-center mb-8">
           <RefreshCw className="w-8 h-8 text-[#EE1D23] animate-spin mb-3" />
@@ -1136,7 +1331,7 @@ export default function AT5Dashboard() {
           <div className="flex flex-wrap items-center justify-center gap-3">
             <button
               onClick={() => {
-                const preConfiguredUrl = (import.meta as any).env?.VITE_GITHUB_EXCEL_URL_AT5 || (import.meta as any).env?.VITE_GITHUB_EXCEL_URL;
+                const preConfiguredUrl = getGithubAt5Url();
                 if (preConfiguredUrl) {
                   loadFromGithub(preConfiguredUrl);
                 } else {
@@ -1154,6 +1349,15 @@ export default function AT5Dashboard() {
             >
               <Upload className="w-3.5 h-3.5 text-[#EE1D23]" />
               <span>Importar Excel</span>
+            </button>
+            <button
+              onClick={() => {
+                setData(generateMockAT5Data());
+              }}
+              className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-5 rounded-xl transition-all shadow-2xs active:scale-95 uppercase italic text-xs cursor-pointer"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
+              <span>Dados Exemplo</span>
             </button>
           </div>
         </div>

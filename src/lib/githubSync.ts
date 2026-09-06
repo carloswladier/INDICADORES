@@ -2,6 +2,7 @@ export const DEFAULT_GITHUB_URLS = {
   at1: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/DASH%20AT1%20PERSONA_ATUALIZADO.xlsx",
   outage: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/OUTAGE_SGO.xlsx",
   revisita: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/REVISITA_30D_Norte.xlsx",
+  at5: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/AT5_NORTE.xlsx",
 };
 
 export function getEnvValue(key: string, altKeys: string[] = [], fallback = ''): string {
@@ -123,6 +124,16 @@ export function getGithubRevisitaUrl(): string {
       'VITE_GITHUB_REVISITA_URL',
       ['VITE_GITHUB_EXCEL_REVISITA', 'GITHUB_EXCEL_REVISITA', 'GITHUB_REVISITA_URL', 'VITE_GITHUB_EXCEL_URL_3', 'VITE_GITHUB_EXCEL_REVISITA_URL'],
       DEFAULT_GITHUB_URLS.revisita
+    )
+  );
+}
+
+export function getGithubAt5Url(): string {
+  return normalizeGithubRawUrl(
+    getEnvValue(
+      'VITE_GITHUB_EXCEL_URL_AT5',
+      ['VITE_GITHUB_AT5_URL', 'GITHUB_EXCEL_AT5', 'VITE_GITHUB_EXCEL_URL_5', 'GITHUB_AT5_URL'],
+      DEFAULT_GITHUB_URLS.at5
     )
   );
 }

@@ -35,7 +35,8 @@ import {
   ChevronLeft,
   ChevronRight,
   PanelLeftClose,
-  PanelLeft
+  PanelLeft,
+  UserMinus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -59,10 +60,11 @@ import { cn, formatPercent, formatDecimal } from './lib/utils';
 import { logApi, LogEntry as ApiLogEntry } from './services/api';
 import { getDbConfig, setDbConfig } from './lib/database';
 import { getGithubAt1Url, normalizeGithubRawUrl, fetchGithubFileArrayBuffer } from './lib/githubSync';
-import AT5Dashboard from './components/AT5Dashboard';
+import AT5Dashboard, { AT5Row } from './components/AT5Dashboard';
 import LOGDashboard from './components/LOGDashboard';
-import OutageDashboard from './components/OutageDashboard';
+import OutageDashboard, { OutageEvent } from './components/OutageDashboard';
 import Revisita30DDashboard from './components/Revisita30DDashboard';
+import ChurnDashboard from './components/ChurnDashboard';
 
 // Diário de Bordo Types
 interface LogEntry {
@@ -947,11 +949,13 @@ const MONTH_ORDER = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
 export default function App() {
   const [baseData, setBaseData] = useState<VisitData[]>([]);
   const [baseCidadeData, setBaseCidadeData] = useState<BaseCidadeData[]>([]);
+  const [sharedOutageData, setSharedOutageData] = useState<OutageEvent[]>([]);
+  const [sharedAt5Data, setSharedAt5Data] = useState<AT5Row[]>([]);
   const [importError, setImportError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [showScrollTop, setShowScrollTop] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'outage' | 'at5' | 'log' | 'revisita30d' | 'logbook'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'outage' | 'at5' | 'churn' | 'log' | 'revisita30d' | 'logbook'>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem('CLARO_SIDEBAR_COLLAPSED') === 'true';
@@ -2142,6 +2146,22 @@ export default function App() {
                 >
                   <FileSpreadsheet className={cn("w-4 h-4 shrink-0", activeTab === 'at5' ? "text-white" : "text-[#EE1D23]")} />
                   {!isSidebarCollapsed && <span>AT5</span>}
+                </button>
+
+                {/* CHURN */}
+                <button
+                  onClick={() => setActiveTab('churn')}
+                  title="CHURN"
+                  className={cn(
+                    "flex items-center gap-2.5 px-2.5 py-2 rounded-xl font-black uppercase italic text-[11px] tracking-wide transition-all active:scale-95 whitespace-nowrap w-full text-left cursor-pointer",
+                    isSidebarCollapsed ? "md:justify-center md:px-0" : "",
+                    activeTab === 'churn'
+                      ? "bg-[#EE1D23] text-white shadow-md shadow-red-500/25"
+                      : "bg-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100/80"
+                  )}
+                >
+                  <UserMinus className={cn("w-4 h-4 shrink-0", activeTab === 'churn' ? "text-white" : "text-[#EE1D23]")} />
+                  {!isSidebarCollapsed && <span>CHURN</span>}
                 </button>
 
                 {/* LOG */}
@@ -3587,11 +3607,25 @@ export default function App() {
             <OutageDashboard 
               at1DailyVolume={dailyVolume}
               at1ComparisonMonths={comparisonMonths}
+              data={sharedOutageData}
+              onDataChange={setSharedOutageData}
             />
           </div>
 
           <div className={activeTab === 'at5' ? 'block' : 'hidden'}>
-            <AT5Dashboard />
+            <AT5Dashboard 
+              data={sharedAt5Data}
+              onDataChange={setSharedAt5Data}
+            />
+          </div>
+
+          <div className={activeTab === 'churn' ? 'block' : 'hidden'}>
+            <ChurnDashboard 
+              outageData={sharedOutageData}
+              at5Data={sharedAt5Data}
+              onOutageDataChange={setSharedOutageData}
+              onAt5DataChange={setSharedAt5Data}
+            />
           </div>
 
           <div className={activeTab === 'log' ? 'block' : 'hidden'}>
