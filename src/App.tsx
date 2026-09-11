@@ -1743,10 +1743,10 @@ export default function App() {
   const COLORS = [CLARO_RED, '#666666', '#999999'];
 
   // Excel Import Handler
-  // Excel Import Handler
   const processExcelData = (bstr: any) => {
     try {
-      const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
+      const isBuffer = bstr instanceof ArrayBuffer || (typeof Uint8Array !== 'undefined' && bstr instanceof Uint8Array);
+      const wb = XLSX.read(bstr, { type: isBuffer ? 'array' : 'binary', cellDates: true });
       
       // 1. Read Main Data
       const analiticoSheetName = wb.SheetNames.find(name => {
@@ -2000,7 +2000,8 @@ export default function App() {
       setImportError('Erro ao ler o arquivo.');
       setIsImporting(false);
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
   };
 
   const handleGithubLoad = async (urlToLoad?: string | React.MouseEvent) => {
@@ -2033,6 +2034,15 @@ export default function App() {
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-[#F5F5F5] text-[#333333] font-sans flex flex-col md:flex-row">
+        {/* Hidden File Input for Excel Import */}
+        <input 
+          type="file" 
+          ref={fileInputRef} 
+          onChange={handleFileUpload} 
+          accept=".xlsx, .xls, .csv" 
+          className="hidden" 
+        />
+
         {/* Left Sidebar Navigation - Compact & Collapsible */}
         <aside className={cn(
           "bg-white border-b md:border-b-0 md:border-r border-slate-200 p-2.5 md:p-3 md:min-h-screen md:sticky md:top-0 flex flex-col justify-between shrink-0 shadow-xs z-30 transition-all duration-300 relative",

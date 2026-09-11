@@ -469,6 +469,7 @@ export default function OutageDashboard({
     mes: ['Todos'] as string[],
     semana: ['Todos'] as string[],
     cidade: ['Todos'] as string[],
+    topologia: ['Todos'] as string[],
     catProd2: ['Todos'] as string[],
     tipo: ['Todos'] as string[],
     tipoOutage: ['Todos'] as string[],
@@ -496,6 +497,11 @@ export default function OutageDashboard({
     })];
     const semanas: string[] = ['Todos', 'S1', 'S2', 'S3', 'S4', 'S5'];
     const cidades: string[] = ['Todos', ...Array.from(new Set<string>(data.map(d => String(d.cidade || '')).filter(Boolean))).sort((a: string, b: string) => a.localeCompare(b, 'pt-BR'))];
+    
+    // Extract available topologies based on current scoped data
+    const rawTopologias = Array.from(new Set<string>(scoped.map(d => String(d.topologia || d.nodeAfetado || '')).filter(Boolean)));
+    const topologias: string[] = ['Todos', ...rawTopologias.sort((a: string, b: string) => a.localeCompare(b, 'pt-BR'))];
+
     const catProd2List: string[] = ['Todos', ...Array.from(new Set<string>(scoped.map(d => String(d.catProd2 || '')).filter(Boolean))).sort((a: string, b: string) => a.localeCompare(b, 'pt-BR'))];
     const tipos: string[] = ['Todos', ...Array.from(new Set<string>(scoped.map(d => String(d.tipo || d.tipoOutage || '')).filter(Boolean))).sort((a: string, b: string) => a.localeCompare(b, 'pt-BR'))];
     // Explicit standard status list: CANCELADO, DESIGNADO, EM PROGRESSO, FECHADO, PENDENTE, RESOLVIDO
@@ -504,7 +510,7 @@ export default function OutageDashboard({
       .filter(s => !standardStatuses.includes(s));
     const statuses: string[] = ['Todos', ...standardStatuses, ...otherStatuses];
 
-    return { meses, semanas, cidades, catProd2List, tipos, statuses };
+    return { meses, semanas, cidades, topologias, catProd2List, tipos, statuses };
   }, [data, filters.cidade]);
 
   // Filtered dataset with robust normalization and empty array handling
@@ -541,6 +547,16 @@ export default function OutageDashboard({
           return nc === itemCidade || itemCidade.includes(nc) || nc.includes(itemCidade);
         });
         if (!matchCidade) return false;
+      }
+
+      // Topologia
+      if (!isAllOrEmpty(filters.topologia)) {
+        const itemTop = norm(item.topologia || item.nodeAfetado);
+        const matchTop = filters.topologia.some(t => {
+          const nt = norm(t);
+          return nt === itemTop || itemTop.includes(nt) || nt.includes(itemTop);
+        });
+        if (!matchTop) return false;
       }
 
       // Cat. Prod. 2
@@ -620,6 +636,9 @@ export default function OutageDashboard({
       ? Math.round(validDurations.reduce((acc, d) => acc + (d.duracaoMinutos || 0), 0) / validDurations.length)
       : 0;
 
+    const datesWithEvents = new Set(filteredData.map(d => d.dataInicio).filter(Boolean));
+    const diasComEventos = datesWithEvents.size;
+
     return {
       total,
       resolvido,
@@ -637,7 +656,8 @@ export default function OutageDashboard({
       pendentePct: total > 0 ? (pendente / total) * 100 : 0,
       emAndamentoPct: total > 0 ? (emProgresso / total) * 100 : 0,
       totalClientes,
-      mttrMedioMinutos
+      mttrMedioMinutos,
+      diasComEventos
     };
   }, [filteredData]);
 
@@ -887,6 +907,13 @@ export default function OutageDashboard({
 
     return Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
   }, [filteredData, filters.mes]);
+
+  // Distinct days with outage events in the current timeline view
+  const daysWithEvents = useMemo(() => {
+    return dailyChartData.filter(d => (d.Total || 0) > 0).length;
+  }, [dailyChartData]);
+
+  const totalDaysInPeriod = dailyChartData.length;
 
   // Chart: Status Breakdown
   const statusPieData = useMemo(() => {
@@ -2036,6 +2063,7 @@ export default function OutageDashboard({
                     mes: ['Todos'],
                     semana: ['Todos'],
                     cidade: ['Todos'],
+                    topologia: ['Todos'],
                     catProd2: ['Todos'],
                     tipo: ['Todos'],
                     tipoOutage: ['Todos'],
@@ -2162,6 +2190,7 @@ export default function OutageDashboard({
                 {(filters.mes.length > 0 && !filters.mes.includes('Todos') || 
                   filters.semana.length > 0 && !filters.semana.includes('Todos') || 
                   filters.cidade.length > 0 && !filters.cidade.includes('Todos') || 
+                  filters.topologia.length > 0 && !filters.topologia.includes('Todos') || 
                   filters.catProd2.length > 0 && !filters.catProd2.includes('Todos') || 
                   filters.tipo.length > 0 && !filters.tipo.includes('Todos') || 
                   filters.status.length > 0 && !filters.status.includes('Todos') ||
@@ -2171,6 +2200,7 @@ export default function OutageDashboard({
                       mes: ['Todos'],
                       semana: ['Todos'],
                       cidade: ['Todos'],
+                      topologia: ['Todos'],
                       catProd2: ['Todos'],
                       tipo: ['Todos'],
                       tipoOutage: ['Todos'],
@@ -2186,7 +2216,7 @@ export default function OutageDashboard({
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                 {/* MÊS */}
                 <MultiFilterSelect 
                   label="Mês" 
@@ -2212,6 +2242,16 @@ export default function OutageDashboard({
                   value={filters.cidade}
                   options={filterOptions.cidades}
                   onChange={(v) => setFilters(f => ({ ...f, cidade: v }))}
+                />
+
+                {/* TOPOLOGIA */}
+                <MultiFilterSelect 
+                  label="Topologia" 
+                  icon={<Network className="w-3.5 h-3.5" />}
+                  value={filters.topologia}
+                  options={filterOptions.topologias}
+                  onChange={(v) => setFilters(f => ({ ...f, topologia: v }))}
+                  placeholder="Todas as topologias"
                 />
 
                 {/* CAT. PROD. 2 */}
@@ -2269,6 +2309,28 @@ export default function OutageDashboard({
                   />
                 </div>
               </div>
+
+              {/* Active Filter Chips */}
+              {filters.topologia.filter(t => t !== 'Todos').length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-slate-100">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                    <Network className="w-3 h-3 text-[#EE1D23]" />
+                    Filtro Topologia:
+                  </span>
+                  {filters.topologia.filter(t => t !== 'Todos').map(top => (
+                    <span key={top} className="inline-flex items-center gap-1.5 bg-red-50 text-[#EE1D23] border border-red-200 px-2.5 py-1 rounded-lg text-xs font-bold shadow-2xs">
+                      {top}
+                      <button 
+                        onClick={() => setFilters(f => ({ ...f, topologia: f.topologia.filter(t => t !== top) }))}
+                        className="hover:text-red-800 transition-colors cursor-pointer"
+                        title={`Remover topologia ${top}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           </section>
 
@@ -2284,10 +2346,14 @@ export default function OutageDashboard({
                 <div className="relative z-10 flex-1 pr-2">
                   <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1 truncate">Total de Eventos</p>
                   <h4 className="text-3xl sm:text-4xl font-black text-[#1A1A1A] tracking-tighter">{metrics.total.toLocaleString()}</h4>
-                  <div className="mt-4 flex items-center gap-1.5">
+                  <div className="mt-3 flex flex-col gap-1.5">
                     <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1 truncate">
                       <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                       {metrics.totalClientes.toLocaleString()} clientes
+                    </span>
+                    <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200 flex items-center gap-1 w-fit shadow-2xs">
+                      <Calendar className="w-3 h-3 text-emerald-600 shrink-0" />
+                      {metrics.diasComEventos} {metrics.diasComEventos === 1 ? 'dia com evento' : 'dias com eventos'}
                     </span>
                   </div>
                 </div>
@@ -2875,16 +2941,25 @@ export default function OutageDashboard({
           <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-md border border-slate-100 flex flex-col">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="px-2.5 py-0.5 rounded-full bg-[#EE1D23] text-white text-[10px] font-black uppercase tracking-wider">
                     Volume Diário
                   </span>
-                  <h3 className="text-lg font-black text-slate-900 uppercase italic tracking-tight">
-                    Evolução Diária de Eventos (Outage)
-                  </h3>
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-2xs">
+                    <Calendar className="w-3 h-3 text-emerald-600" />
+                    <span>Houve evento em <strong>{daysWithEvents}</strong> {daysWithEvents === 1 ? 'dia' : 'dias'}</span>
+                    <span className="text-emerald-600/80 font-semibold">({totalDaysInPeriod} dias no período)</span>
+                  </span>
                 </div>
-                <p className="text-xs font-bold text-slate-400 mt-0.5">
-                  Distribuição temporal com contagem diária de ocorrências por data de início
+                <h3 className="text-lg font-black text-slate-900 uppercase italic tracking-tight mt-1.5">
+                  Evolução Diária de Eventos (Outage)
+                </h3>
+                <p className="text-xs font-bold text-slate-500 mt-0.5 flex flex-wrap items-center gap-1.5">
+                  <span>Distribuição temporal com contagem diária de ocorrências por data de início.</span>
+                  <span className="text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md font-extrabold text-[11px] inline-flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-[#EE1D23]" />
+                    Quantidade de dias com ocorrência: <span className="text-[#EE1D23] font-black">{daysWithEvents} {daysWithEvents === 1 ? 'dia' : 'dias'}</span> ({totalDaysInPeriod - daysWithEvents} dias sem ocorrência)
+                  </span>
                 </p>
               </div>
               
