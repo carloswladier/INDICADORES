@@ -2,7 +2,10 @@ export const DEFAULT_GITHUB_URLS = {
   at1: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/DASH%20AT1%20PERSONA_ATUALIZADO.xlsx",
   outage: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/OUTAGE_SGO.xlsx",
   revisita: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/REVISITA_30D_Norte.xlsx",
+  revisitaJanJun: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/REVISITA_30D_Jan_Jun.xlsx",
+  revisitaJulDez: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/REVISITA_30D_Jul_Dez.xlsx",
   at5: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/AT5_NORTE.xlsx",
+  qoeGpon: "https://raw.githubusercontent.com/carloswladier/INDICADORES/main/QOE_GPON.xlsx",
 };
 
 export function getEnvValue(key: string, altKeys: string[] = [], fallback = ''): string {
@@ -74,6 +77,28 @@ export async function fetchGithubFileArrayBuffer(targetUrl: string): Promise<Arr
   if (primaryUrl.includes('REVISITA_30D_Norte.xlsx')) {
     candidates.push(primaryUrl.replace('REVISITA_30D_Norte.xlsx', 'REVISITA_30D_202608_Norte.xlsx'));
   }
+  if (primaryUrl.includes('REVISITA_30D_Jan_Jun')) {
+    candidates.push(primaryUrl.replace('REVISITA_30D_Jan_Jun', 'REVISITA_30D_JAN_JUN'));
+    candidates.push(primaryUrl.replace('REVISITA_30D_Jan_Jun', 'REVISITA_30D_Jan-Jun'));
+    candidates.push(primaryUrl.replace('REVISITA_30D_Jan_Jun', 'REVISITA_30D_Jan_a_Jun'));
+    candidates.push(primaryUrl.replace('.xlsx', '.xls'));
+  }
+  if (primaryUrl.includes('REVISITA_30D_Jul_Dez')) {
+    candidates.push(primaryUrl.replace('REVISITA_30D_Jul_Dez', 'REVISITA_30D_JUL_DEZ'));
+    candidates.push(primaryUrl.replace('REVISITA_30D_Jul_Dez', 'REVISITA_30D_Jul-Dez'));
+    candidates.push(primaryUrl.replace('REVISITA_30D_Jul_Dez', 'REVISITA_30D_Jul_a_Dez'));
+    candidates.push(primaryUrl.replace('.xlsx', '.xls'));
+  }
+  if (primaryUrl.includes('QOE_GPON') || primaryUrl.includes('qoe_gpon') || primaryUrl.includes('QOE')) {
+    candidates.push(primaryUrl.replace('QOE_GPON.xlsx', 'QOE_GPON.XLSX'));
+    candidates.push(primaryUrl.replace('QOE_GPON.xlsx', 'QOE%20GPON.xlsx'));
+    candidates.push(primaryUrl.replace('QOE_GPON.xlsx', 'QOE_GPON_NORTE.xlsx'));
+    candidates.push(primaryUrl.replace('QOE_GPON.xlsx', 'BASE_QOE_GPON.xlsx'));
+    candidates.push(primaryUrl.replace('QOE_GPON.xlsx', 'DASH_QOE_GPON.xlsx'));
+    candidates.push(primaryUrl.replace('QOE_GPON.xlsx', 'qoe_gpon.xlsx'));
+    candidates.push(primaryUrl.replace('.xlsx', '.xls'));
+    candidates.push(primaryUrl.replace('.xlsx', '.csv'));
+  }
 
   // Remove duplicates
   const uniqueCandidates = Array.from(new Set(candidates));
@@ -128,6 +153,26 @@ export function getGithubRevisitaUrl(): string {
   );
 }
 
+export function getGithubRevisitaJanJunUrl(): string {
+  return normalizeGithubRawUrl(
+    getEnvValue(
+      'VITE_GITHUB_REVISITA_JAN_JUN_URL',
+      ['VITE_GITHUB_EXCEL_REVISITA_JAN_JUN', 'GITHUB_EXCEL_REVISITA_JAN_JUN', 'GITHUB_REVISITA_JAN_JUN', 'VITE_GITHUB_REVISITA_JAN_JUN'],
+      DEFAULT_GITHUB_URLS.revisitaJanJun
+    )
+  );
+}
+
+export function getGithubRevisitaJulDezUrl(): string {
+  return normalizeGithubRawUrl(
+    getEnvValue(
+      'VITE_GITHUB_REVISITA_JUL_DEZ_URL',
+      ['VITE_GITHUB_EXCEL_REVISITA_JUL_DEZ', 'GITHUB_EXCEL_REVISITA_JUL_DEZ', 'GITHUB_REVISITA_JUL_DEZ', 'VITE_GITHUB_REVISITA_JUL_DEZ'],
+      DEFAULT_GITHUB_URLS.revisitaJulDez
+    )
+  );
+}
+
 export function getGithubAt5Url(): string {
   return normalizeGithubRawUrl(
     getEnvValue(
@@ -137,4 +182,15 @@ export function getGithubAt5Url(): string {
     )
   );
 }
+
+export function getGithubQoeGponUrl(): string {
+  return normalizeGithubRawUrl(
+    getEnvValue(
+      'VITE_GITHUB_EXCEL_URL_QOE_GPON',
+      ['VITE_GITHUB_QOE_GPON_URL', 'GITHUB_EXCEL_QOE_GPON', 'GITHUB_QOE_GPON_URL', 'VITE_GITHUB_EXCEL_URL_QOE'],
+      DEFAULT_GITHUB_URLS.qoeGpon
+    )
+  );
+}
+
 

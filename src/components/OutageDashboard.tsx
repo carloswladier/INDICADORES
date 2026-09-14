@@ -60,6 +60,7 @@ import {
 import { MultiFilterSelect } from './MultiFilterSelect';
 import { cn, formatPercent, formatDecimal } from '../lib/utils';
 import { getGithubOutageUrl, normalizeGithubRawUrl, fetchGithubFileArrayBuffer } from '../lib/githubSync';
+import { VisitData } from '../data';
 
 export type OutageStatus = 
   | 'CANCELADO' 
@@ -121,6 +122,33 @@ const detectMonthIndex = (val: any): number => {
   if (str === '11' || str.includes('nov')) return 10;
   if (str === '12' || str.includes('dez') || str.includes('dec')) return 11;
   return -1;
+};
+
+// Helper to determine the current month or latest available month in a dataset
+export const getCurrentOrLatestMonth = (events?: OutageEvent[]): string => {
+  const currentCalendarMonth = MONTH_ORDER[new Date().getMonth()] || 'Setembro';
+  if (!events || events.length === 0) return currentCalendarMonth;
+
+  const monthsInEvents = Array.from(
+    new Set(events.map(e => e.mes).filter(Boolean) as string[])
+  );
+  if (monthsInEvents.length === 0) return currentCalendarMonth;
+
+  const currentNorm = currentCalendarMonth.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const matchedCurrent = monthsInEvents.find(m => {
+    const mNorm = m.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    return mNorm === currentNorm;
+  });
+
+  if (matchedCurrent) return matchedCurrent;
+
+  const sorted = [...monthsInEvents].sort((a, b) => {
+    const idxA = detectMonthIndex(a);
+    const idxB = detectMonthIndex(b);
+    return idxB - idxA;
+  });
+
+  return sorted[0] || currentCalendarMonth;
 };
 
 export const CAT_PROD_2_DEFAULT = [
@@ -402,6 +430,7 @@ export const RenderSplitDateTime: React.FC<{ formatted?: string | null; rawDate?
 export interface OutageDashboardProps {
   at1DailyVolume?: Array<{ name: string; value: number | null; previousValue: number }>;
   at1ComparisonMonths?: { current: string; previous: string };
+  at1Data?: VisitData[];
   data?: OutageEvent[];
   onDataChange?: (data: OutageEvent[]) => void;
 }
@@ -409,6 +438,7 @@ export interface OutageDashboardProps {
 export default function OutageDashboard({
   at1DailyVolume = [],
   at1ComparisonMonths = { current: 'Atual', previous: 'Anterior' },
+  at1Data = [],
   data: externalData,
   onDataChange
 }: OutageDashboardProps = {}) {
@@ -439,12 +469,23 @@ export default function OutageDashboard({
     }
   };
 
+  const hasInitializedMonthRef = useRef(false);
+
   useEffect(() => {
     if (externalData !== undefined) {
       setInternalData(externalData);
       try {
         (window as any).__APP_OUTAGE_DATA = externalData;
       } catch (e) {}
+
+      if (externalData.length > 0 && !hasInitializedMonthRef.current) {
+        hasInitializedMonthRef.current = true;
+        const targetMonth = getCurrentOrLatestMonth(externalData);
+        setFilters(prev => ({
+          ...prev,
+          mes: [targetMonth]
+        }));
+      }
     }
   }, [externalData]);
 
@@ -464,18 +505,21 @@ export default function OutageDashboard({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Filters State
-  const [filters, setFilters] = useState({
-    mes: ['Todos'] as string[],
-    semana: ['Todos'] as string[],
-    cidade: ['Todos'] as string[],
-    topologia: ['Todos'] as string[],
-    catProd2: ['Todos'] as string[],
-    tipo: ['Todos'] as string[],
-    tipoOutage: ['Todos'] as string[],
-    status: ['Todos'] as string[],
-    startDate: '',
-    endDate: ''
+  // Filters State - Default to Current Month on load as requested
+  const [filters, setFilters] = useState(() => {
+    const initialMonth = getCurrentOrLatestMonth(data);
+    return {
+      mes: [initialMonth] as string[],
+      semana: ['Todos'] as string[],
+      cidade: ['Todos'] as string[],
+      topologia: ['Todos'] as string[],
+      catProd2: ['Todos'] as string[],
+      tipo: ['Todos'] as string[],
+      tipoOutage: ['Todos'] as string[],
+      status: ['Todos'] as string[],
+      startDate: '',
+      endDate: ''
+    };
   });
 
   // Dynamic filter options based on available data (cascading when city is chosen)
@@ -549,12 +593,15 @@ export default function OutageDashboard({
         if (!matchCidade) return false;
       }
 
-      // Topologia
+      // Topologia - Exact normalized matching so selecting a topology filters all charts strictly to that topology
       if (!isAllOrEmpty(filters.topologia)) {
         const itemTop = norm(item.topologia || item.nodeAfetado);
         const matchTop = filters.topologia.some(t => {
           const nt = norm(t);
-          return nt === itemTop || itemTop.includes(nt) || nt.includes(itemTop);
+          if (nt === 'vazio' || nt === '(vazio)' || nt === 'sem topologia') {
+            return !itemTop;
+          }
+          return nt === itemTop;
         });
         if (!matchTop) return false;
       }
@@ -995,6 +1042,107 @@ export default function OutageDashboard({
       return list.sort((a, b) => a.cidade.localeCompare(b.cidade, 'pt-BR'));
     }
   }, [filteredData, cityChartSort]);
+
+  // Volume Diário Comparativo de Visitas (AT1)
+  // REQUISITO ESTRITO: "só mostrar volume nesse gráfico quando carregar os dados do AT1"
+  // Nunca utilizar eventos de Outage como substituto de visitas do AT1 neste gráfico.
+  const outageComparisonData = useMemo(() => {
+    const isAllOrEmpty = (arr?: string[]) => !arr || arr.length === 0 || arr.includes('Todos');
+    const norm = (s: any) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+    const hasDirectAt1 = Boolean(at1Data && at1Data.length > 0);
+    const hasPrecomputedAt1 = Boolean(
+      at1DailyVolume && 
+      at1DailyVolume.length > 0 && 
+      at1DailyVolume.some(p => (p.value !== null && p.value !== undefined && p.value > 0) || (p.previousValue && p.previousValue > 0))
+    );
+
+    const hasAt1Data = hasDirectAt1 || hasPrecomputedAt1;
+
+    // Se o AT1 NÃO estiver carregado, NÃO exibe volume
+    if (!hasAt1Data) {
+      return {
+        hasAt1Data: false,
+        chartPoints: [] as Array<{ name: string; value: number | null; previousValue: number }>,
+        currentMonth: at1ComparisonMonths?.current || 'Atual',
+        previousMonth: at1ComparisonMonths?.previous || 'Anterior'
+      };
+    }
+
+    // Se temos os registros diretos do AT1 (VisitData)
+    if (hasDirectAt1 && at1Data && at1Data.length > 0) {
+      const at1Months = Array.from(new Set(at1Data.map(d => d.mes).filter(Boolean))) as string[];
+      let currentMonth = !isAllOrEmpty(filters.mes) ? filters.mes[0] : (at1ComparisonMonths?.current || at1Months[at1Months.length - 1] || 'Setembro');
+      const currentIdx = MONTH_ORDER.findIndex(m => norm(m) === norm(currentMonth));
+      const previousMonth = currentIdx > 0 ? MONTH_ORDER[currentIdx - 1] : (at1ComparisonMonths?.previous || null);
+
+      // Filtra os itens do AT1 por cidade e topologia (node), se selecionados
+      const filteredAt1 = at1Data.filter(item => {
+        // Cidade
+        if (!isAllOrEmpty(filters.cidade)) {
+          const itemCidade = norm(item.cidade);
+          if (!filters.cidade.some(c => norm(c) === itemCidade)) return false;
+        }
+        // Topologia / Node
+        if (!isAllOrEmpty(filters.topologia)) {
+          const itemNode = norm(item.node);
+          const matchNode = filters.topologia.some(t => {
+            const nt = norm(t);
+            if (nt === 'vazio' || nt === '(vazio)' || nt === 'sem topologia') return !itemNode;
+            return nt === itemNode;
+          });
+          if (!matchNode) return false;
+        }
+        return true;
+      });
+
+      const dayMap: Record<number, { current: number; previous: number }> = {};
+      for (let d = 1; d <= 31; d++) {
+        dayMap[d] = { current: 0, previous: 0 };
+      }
+
+      let lastDayWithData = 0;
+      filteredAt1.forEach(item => {
+        if (!item.fullDate || !(item.fullDate instanceof Date) || isNaN(item.fullDate.getTime())) return;
+        const d = item.fullDate.getDate();
+        if (d < 1 || d > 31) return;
+        const itemMesNorm = norm(item.mes);
+        if (currentMonth && itemMesNorm === norm(currentMonth)) {
+          dayMap[d].current += 1;
+          if (d > lastDayWithData) lastDayWithData = d;
+        } else if (previousMonth && itemMesNorm === norm(previousMonth)) {
+          dayMap[d].previous += 1;
+        }
+      });
+
+      const chartPoints = Object.entries(dayMap).map(([dStr, counts]) => {
+        const dayNum = parseInt(dStr, 10);
+        return {
+          name: dStr.padStart(2, '0'),
+          value: (dayNum > lastDayWithData && counts.current === 0) ? null : counts.current,
+          previousValue: counts.previous,
+        };
+      });
+
+      return {
+        hasAt1Data: true,
+        chartPoints,
+        currentMonth: currentMonth || 'Atual',
+        previousMonth: previousMonth || 'Anterior'
+      };
+    }
+
+    // Se temos os pontos pré-calculados do AT1
+    return {
+      hasAt1Data: true,
+      chartPoints: at1DailyVolume.map(p => ({
+        ...p,
+        name: p.name.padStart(2, '0')
+      })),
+      currentMonth: at1ComparisonMonths?.current || 'Atual',
+      previousMonth: at1ComparisonMonths?.previous || 'Anterior'
+    };
+  }, [at1Data, at1DailyVolume, at1ComparisonMonths, filters]);
 
   // Robust Date Parser supporting Excel Serials, Formatted Strings, Date Objects, Dot/Slash/Dash formats
   // STRICT USER REQUIREMENT:
@@ -1777,17 +1925,21 @@ export default function OutageDashboard({
 
     if (parsedEvents.length > 0) {
       setData(parsedEvents);
-      // Auto-set the active month filter to the most frequent month in the imported dataset
-      const monthFreq: Record<string, number> = {};
-      parsedEvents.forEach(e => {
-        if (e.mes) {
-          monthFreq[e.mes] = (monthFreq[e.mes] || 0) + 1;
-        }
-      });
-      const topMonth = Object.entries(monthFreq).sort((a, b) => b[1] - a[1])[0]?.[0];
-      if (topMonth) {
-        setFilters(prev => ({ ...prev, mes: [topMonth] }));
-      }
+      // STRICT USER REQUIREMENT: "quando carregar os dados, sempre aparecer o mês corrente."
+      const currentMonth = getCurrentOrLatestMonth(parsedEvents);
+      setFilters(prev => ({
+        ...prev,
+        mes: [currentMonth],
+        semana: ['Todos'],
+        cidade: ['Todos'],
+        topologia: ['Todos'],
+        catProd2: ['Todos'],
+        tipo: ['Todos'],
+        tipoOutage: ['Todos'],
+        status: ['Todos'],
+        startDate: '',
+        endDate: ''
+      }));
       setImportProgress(100);
       setTimeout(() => {
         setIsImporting(false);
@@ -1822,6 +1974,8 @@ export default function OutageDashboard({
           const parsed = await res.json();
           if (Array.isArray(parsed) && parsed.length > 0) {
             setData(parsed);
+            const targetMonth = getCurrentOrLatestMonth(parsed);
+            setFilters(prev => ({ ...prev, mes: [targetMonth] }));
             setIsImporting(false);
             setImportProgress(100);
             setShowGithubInput(false);
@@ -2045,11 +2199,24 @@ export default function OutageDashboard({
 
             <button
               onClick={() => {
-                setData(generateExactReferenceOutageData());
-                setFilters(prev => ({ ...prev, mes: ['Agosto'] }));
+                const sample = generateExactReferenceOutageData();
+                setData(sample);
+                const targetMonth = getCurrentOrLatestMonth(sample);
+                setFilters({
+                  mes: [targetMonth],
+                  semana: ['Todos'],
+                  cidade: ['Todos'],
+                  topologia: ['Todos'],
+                  catProd2: ['Todos'],
+                  tipo: ['Todos'],
+                  tipoOutage: ['Todos'],
+                  status: ['Todos'],
+                  startDate: '',
+                  endDate: ''
+                });
               }}
               className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-4 rounded-xl transition-all active:scale-95 text-xs cursor-pointer"
-              title="Restaurar dados padrão de exemplo (6.672 eventos de Agosto)"
+              title="Restaurar dados padrão de exemplo e selecionar o mês corrente"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Restaurar</span>
@@ -2166,8 +2333,21 @@ export default function OutageDashboard({
 
               <button
                 onClick={() => {
-                  setData(generateExactReferenceOutageData());
-                  setFilters(prev => ({ ...prev, mes: ['Agosto'] }));
+                  const sample = generateExactReferenceOutageData();
+                  setData(sample);
+                  const targetMonth = getCurrentOrLatestMonth(sample);
+                  setFilters({
+                    mes: [targetMonth],
+                    semana: ['Todos'],
+                    cidade: ['Todos'],
+                    topologia: ['Todos'],
+                    catProd2: ['Todos'],
+                    tipo: ['Todos'],
+                    tipoOutage: ['Todos'],
+                    status: ['Todos'],
+                    startDate: '',
+                    endDate: ''
+                  });
                 }}
                 className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-4 rounded-xl transition-all shadow-2xs active:scale-95 uppercase italic text-xs cursor-pointer"
               >
@@ -2197,7 +2377,7 @@ export default function OutageDashboard({
                   filters.startDate || filters.endDate) && (
                   <button
                     onClick={() => setFilters({
-                      mes: ['Todos'],
+                      mes: [getCurrentOrLatestMonth(data)],
                       semana: ['Todos'],
                       cidade: ['Todos'],
                       topologia: ['Todos'],
@@ -2777,11 +2957,29 @@ export default function OutageDashboard({
                 <Network className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-xl font-black text-[#333333] uppercase italic tracking-tight">
-                  Top 20 Nodes com Mais Eventos (Topologia)
-                </h3>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-xl font-black text-[#333333] uppercase italic tracking-tight">
+                    Top 20 Nodes com Mais Eventos (Topologia)
+                  </h3>
+                  {filters.topologia.filter(t => t !== 'Todos').length > 0 && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-50 text-[#EE1D23] border border-red-200 text-[11px] font-black uppercase tracking-wider">
+                      <Network className="w-3 h-3 text-[#EE1D23]" />
+                      Filtrando Topologia: {filters.topologia.filter(t => t !== 'Todos').join(', ')}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setFilters(f => ({ ...f, topologia: ['Todos'] }));
+                        }}
+                        className="ml-1 hover:text-red-900 cursor-pointer"
+                        title="Limpar filtro de topologia"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs font-bold text-slate-400">
-                  Ranking consolidado dos elementos de rede (coluna Topologia) mais impactados por incidentes
+                  Ranking consolidado dos elementos de rede (coluna Topologia) mais impactados por incidentes. Clique em um nó para filtrar todo o painel.
                 </p>
               </div>
             </div>
@@ -2883,18 +3081,31 @@ export default function OutageDashboard({
                     fill="#EE1D23" 
                     radius={[0, 8, 8, 0]}
                     barSize={16}
+                    cursor="pointer"
+                    onClick={(entry: any) => {
+                      if (entry && entry.node) {
+                        const isSelected = filters.topologia.includes(entry.node);
+                        setFilters(f => ({
+                          ...f,
+                          topologia: isSelected ? ['Todos'] : [entry.node]
+                        }));
+                      }
+                    }}
                   >
                     <LabelList 
                       dataKey="total" 
                       position="right" 
                       style={{ fontSize: 11, fontWeight: 800, fill: '#334155' }} 
                     />
-                    {topTopologyNodesData.map((entry, index) => (
-                      <Cell 
-                        key={`cell-${index}`} 
-                        fill={index < 3 ? '#EE1D23' : index < 10 ? '#F87171' : '#CBD5E1'} 
-                      />
-                    ))}
+                    {topTopologyNodesData.map((entry, index) => {
+                      const isNodeSelected = filters.topologia.includes(entry.node);
+                      return (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={isNodeSelected ? '#991B1B' : index < 3 ? '#EE1D23' : index < 10 ? '#F87171' : '#CBD5E1'} 
+                        />
+                      );
+                    })}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -2908,26 +3119,51 @@ export default function OutageDashboard({
           {/* Cards Rápidos dos Top 3 Nodes */}
           {topTopologyNodesData.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 pt-6 border-t border-slate-100">
-              {topTopologyNodesData.slice(0, 3).map((n, idx) => (
-                <div key={n.node} className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={cn(
-                      "w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs text-white",
-                      idx === 0 ? "bg-[#EE1D23]" : idx === 1 ? "bg-amber-500" : "bg-slate-600"
-                    )}>
-                      #{idx + 1}
+              {topTopologyNodesData.slice(0, 3).map((n, idx) => {
+                const isSelected = filters.topologia.includes(n.node);
+                return (
+                  <div 
+                    key={n.node} 
+                    onClick={() => {
+                      setFilters(f => ({
+                        ...f,
+                        topologia: isSelected ? ['Todos'] : [n.node]
+                      }));
+                    }}
+                    className={cn(
+                      "p-4 rounded-2xl flex items-center justify-between cursor-pointer transition-all active:scale-98",
+                      isSelected 
+                        ? "bg-red-50/90 border-2 border-[#EE1D23] shadow-md ring-2 ring-red-500/20" 
+                        : "bg-slate-50 border border-slate-200/80 hover:border-red-300 hover:bg-red-50/30"
+                    )}
+                    title={isSelected ? "Clique para remover filtro" : `Filtrar todo o painel pela topologia ${n.node}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs text-white",
+                        idx === 0 ? "bg-[#EE1D23]" : idx === 1 ? "bg-amber-500" : "bg-slate-600"
+                      )}>
+                        #{idx + 1}
+                      </div>
+                      <div>
+                        <h5 className="font-black text-slate-900 text-sm flex items-center gap-1.5">
+                          {n.node}
+                          {isSelected && (
+                            <span className="text-[9px] bg-[#EE1D23] text-white px-1.5 py-0.2 rounded font-black">
+                              ATIVO
+                            </span>
+                          )}
+                        </h5>
+                        <p className="text-[10px] font-bold text-slate-400">{n.cidade}</p>
+                      </div>
                     </div>
-                    <div>
-                      <h5 className="font-black text-slate-900 text-sm">{n.node}</h5>
-                      <p className="text-[10px] font-bold text-slate-400">{n.cidade}</p>
+                    <div className="text-right">
+                      <span className="text-base font-black text-[#EE1D23]">{n.total}</span>
+                      <span className="text-[10px] block font-bold text-slate-400">eventos</span>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <span className="text-base font-black text-[#EE1D23]">{n.total}</span>
-                    <span className="text-[10px] block font-bold text-slate-400">eventos</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -3089,7 +3325,7 @@ export default function OutageDashboard({
             </div>
           </div>
 
-          {/* Chart 2: Volume Diário (Comparativo de Visitas por Dia - Baseado nos Filtros da Aba AT1) */}
+          {/* Chart 2: Volume Diário (Comparativo de Visitas por Dia - Reativo a Topologia e Filtros) */}
           <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-md border border-slate-100 flex flex-col">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
               <div className="flex items-center gap-3">
@@ -3097,134 +3333,183 @@ export default function OutageDashboard({
                   <Activity className="w-5 h-5 text-[#EE1D23]" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tighter">Volume Diário</h3>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tighter">Volume Diário</h3>
+                    {filters.topologia.filter(t => t !== 'Todos').length > 0 && (
+                      <span className="text-[10px] font-black text-[#EE1D23] bg-red-50 border border-red-200 px-2 py-0.5 rounded-md uppercase">
+                        Topologia: {filters.topologia.filter(t => t !== 'Todos').join(', ')}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Comparativo de visitas por dia</p>
                 </div>
               </div>
-              <div className="flex items-center gap-6">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-slate-300"></div>
-                  <span className="text-[10px] text-slate-500 font-black uppercase tracking-tighter">{at1ComparisonMonths.previous || 'Anterior'}</span>
+              {outageComparisonData.hasAt1Data ? (
+                <div className="flex items-center gap-6">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-slate-300"></div>
+                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-tighter">{outageComparisonData.previousMonth || 'Anterior'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-[#EE1D23]"></div>
+                    <span className="text-[10px] text-slate-500 font-black uppercase tracking-tighter">{outageComparisonData.currentMonth || 'Atual'}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-[#EE1D23]"></div>
-                  <span className="text-[10px] text-slate-500 font-black uppercase tracking-tighter">{at1ComparisonMonths.current || 'Atual'}</span>
+              ) : (
+                <div className="flex items-center gap-2 bg-slate-50 border border-slate-200/80 px-2.5 py-1 rounded-lg">
+                  <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Aguardando dados do AT1</span>
                 </div>
-              </div>
+              )}
             </div>
 
-            <div className="h-[280px] w-full min-h-[280px]">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <ComposedChart data={at1DailyVolume} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="outageAt1ColorValue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#EE1D23" stopOpacity={0.1}/>
-                      <stop offset="95%" stopColor="#EE1D23" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis 
-                    dataKey="name" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }}
-                    interval="preserveStartEnd"
-                    minTickGap={10}
-                  />
-                  <YAxis 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }}
-                  />
-                  <Tooltip 
-                    cursor={{ stroke: '#cbd5e1', strokeWidth: 2, strokeDasharray: '5 5' }}
-                    content={({ active, payload, label }) => {
-                      if (active && payload && payload.length) {
-                        return (
-                          <div className="bg-white p-4 rounded-2xl shadow-xl border border-slate-50 min-w-[140px]">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 border-b border-slate-50 pb-1">Dia {label}</p>
-                            <div className="space-y-2">
-                              {payload.map((entry: any, index: number) => {
-                                if (entry.dataKey === 'areaValue') return null;
-                                return (
-                                  <div key={index} className="flex items-center justify-between gap-4">
-                                    <div className="flex items-center gap-2">
-                                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.stroke || entry.fill }} />
-                                      <span className="text-[11px] font-bold text-slate-600">{entry.name}</span>
+            {outageComparisonData.hasAt1Data ? (
+              <div className="h-[280px] w-full min-h-[280px]">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                  <ComposedChart data={outageComparisonData.chartPoints} margin={{ top: 25, right: 30, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="outageAt1ColorValue" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#EE1D23" stopOpacity={0.1}/>
+                        <stop offset="95%" stopColor="#EE1D23" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis 
+                      dataKey="name" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#64748B', fontSize: 9.5, fontWeight: 800 }}
+                      interval={0}
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }}
+                    />
+                    <Tooltip 
+                      cursor={{ stroke: '#cbd5e1', strokeWidth: 2, strokeDasharray: '5 5' }}
+                      content={({ active, payload, label }) => {
+                        if (active && payload && payload.length) {
+                          return (
+                            <div className="bg-white p-4 rounded-2xl shadow-xl border border-slate-50 min-w-[140px]">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 border-b border-slate-50 pb-1">Dia {label}</p>
+                              <div className="space-y-2">
+                                {payload.map((entry: any, index: number) => {
+                                  if (entry.dataKey === 'areaValue') return null;
+                                  return (
+                                    <div key={index} className="flex items-center justify-between gap-4">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.stroke || entry.fill }} />
+                                        <span className="text-[11px] font-bold text-slate-600">{entry.name}</span>
+                                      </div>
+                                      <span className="text-xs font-black" style={{ color: entry.stroke || entry.fill }}>{entry.value?.toLocaleString()}</span>
                                     </div>
-                                    <span className="text-xs font-black" style={{ color: entry.stroke || entry.fill }}>{entry.value?.toLocaleString()}</span>
-                                  </div>
-                                );
-                              })}
+                                  );
+                                })}
+                              </div>
                             </div>
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="value"
-                    stroke="none"
-                    fill="url(#outageAt1ColorValue)"
-                    fillOpacity={1}
-                    connectNulls
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="previousValue" 
-                    name={at1ComparisonMonths.previous || 'Mês Anterior'} 
-                    stroke="#cbd5e1" 
-                    strokeWidth={3} 
-                    dot={{ r: 0 }}
-                    activeDot={{ r: 4 }}
-                    connectNulls
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="value" 
-                    name={at1ComparisonMonths.current || 'Mês Atual'} 
-                    stroke="#EE1D23" 
-                    strokeWidth={4} 
-                    dot={{ r: 3, fill: '#EE1D23', strokeWidth: 2, stroke: '#fff' }}
-                    activeDot={{ r: 6, strokeWidth: 0 }}
-                    connectNulls
-                  >
-                    <LabelList 
-                      dataKey="value" 
-                      position="top" 
-                      content={(props: any) => {
-                        const { x, y, value, index } = props;
-                        if (value === null || value === undefined || value === 0) return null;
-                        
-                        const isLast = index === at1DailyVolume.length - 1;
-                        const prevVal = (index > 0 && at1DailyVolume[index - 1]) ? at1DailyVolume[index - 1].value : null;
-                        const nextVal = (index < at1DailyVolume.length - 1 && at1DailyVolume[index + 1]) ? at1DailyVolume[index + 1].value : null;
-                        
-                        const isPeak = (prevVal === null || value > prevVal) && (nextVal === null || value > nextVal);
-                        const isStep = index % 4 === 0;
-
-                        if (!isPeak && !isLast && !isStep) return null;
-
-                        return (
-                          <text 
-                            x={x} 
-                            y={y - 12} 
-                            fill="#EE1D23" 
-                            fontSize={10} 
-                            fontWeight={900} 
-                            textAnchor="middle"
-                          >
-                            {value}
-                          </text>
-                        );
+                          );
+                        }
+                        return null;
                       }}
                     />
-                  </Line>
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
+                    <Area
+                      type="monotone"
+                      dataKey="value"
+                      stroke="none"
+                      fill="url(#outageAt1ColorValue)"
+                      fillOpacity={1}
+                      connectNulls
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="previousValue" 
+                      name={outageComparisonData.previousMonth || 'Mês Anterior'} 
+                      stroke="#cbd5e1" 
+                      strokeWidth={3} 
+                      dot={{ r: 0 }}
+                      activeDot={{ r: 4 }}
+                      connectNulls
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="value" 
+                      name={outageComparisonData.currentMonth || 'Mês Atual'} 
+                      stroke="#EE1D23" 
+                      strokeWidth={4} 
+                      dot={{ r: 3.5, fill: '#EE1D23', strokeWidth: 2, stroke: '#fff' }}
+                      activeDot={{ r: 6, strokeWidth: 0 }}
+                      connectNulls
+                    >
+                      <LabelList 
+                        dataKey="value" 
+                        position="top" 
+                        content={(props: any) => {
+                          const { x, y, value, index } = props;
+                          if (value === null || value === undefined || value === 0) return null;
+                          
+                          const points = outageComparisonData.chartPoints;
+                          const prevVal = (index > 0 && points[index - 1]) ? points[index - 1].value : null;
+                          const nextVal = (index < points.length - 1 && points[index + 1]) ? points[index + 1].value : null;
+                          
+                          const isCloseToNeighbor = 
+                            (prevVal !== null && Math.abs(value - prevVal) < 140) ||
+                            (nextVal !== null && Math.abs(value - nextVal) < 140);
+                          
+                          const isElevated = isCloseToNeighbor && (index % 2 === 1);
+                          const labelY = isElevated ? y - 22 : y - 10;
+
+                          return (
+                            <g key={`outage-daily-val-${index}`}>
+                              {isElevated && (
+                                <line 
+                                  x1={x} 
+                                  y1={y - 4} 
+                                  x2={x} 
+                                  y2={labelY + 8} 
+                                  stroke="#EE1D23" 
+                                  strokeWidth={1} 
+                                  strokeDasharray="2 2"
+                                  opacity={0.45} 
+                                />
+                              )}
+                              <text 
+                                x={x} 
+                                y={labelY} 
+                                fill="#EE1D23" 
+                                fontSize={9.5} 
+                                fontWeight={900} 
+                                textAnchor="middle"
+                                style={{
+                                  paintOrder: 'stroke fill',
+                                  stroke: '#ffffff',
+                                  strokeWidth: 2.5,
+                                  strokeLinejoin: 'round'
+                                }}
+                              >
+                                {value}
+                              </text>
+                            </g>
+                          );
+                        }}
+                      />
+                    </Line>
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-[280px] w-full min-h-[280px] flex flex-col items-center justify-center bg-slate-50/70 rounded-2xl border border-dashed border-slate-200 p-6 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-red-50 flex items-center justify-center mb-3">
+                  <Activity className="w-6 h-6 text-[#EE1D23]/60" />
+                </div>
+                <h4 className="text-sm font-black text-slate-800 uppercase italic tracking-tight mb-1">
+                  Aguardando Dados do AT1
+                </h4>
+                <p className="text-xs text-slate-500 max-w-md font-medium leading-relaxed">
+                  O volume comparativo diário só é exibido quando os dados do <strong>AT1 (Visitas)</strong> forem carregados. Importe ou sincronize a base do AT1 para visualizar as curvas diárias.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 

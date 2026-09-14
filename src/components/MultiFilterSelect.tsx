@@ -12,6 +12,7 @@ export interface MultiFilterSelectProps {
   getOptionLabel?: (opt: string) => string;
   placeholder?: string;
   className?: string;
+  optionCounts?: Record<string, number>;
 }
 
 export function MultiFilterSelect({
@@ -23,6 +24,7 @@ export function MultiFilterSelect({
   getOptionLabel,
   placeholder = 'Pesquisar...',
   className,
+  optionCounts,
 }: MultiFilterSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -78,16 +80,16 @@ export function MultiFilterSelect({
   return (
     <div className={cn("relative space-y-1.5", className)} ref={containerRef}>
       {label && (
-        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 ml-1">
-          {icon && <span className="text-[#EE1D23]">{icon}</span>}
-          {label}
+        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 ml-1 h-5 whitespace-nowrap overflow-hidden text-ellipsis">
+          {icon && <span className="text-[#EE1D23] shrink-0">{icon}</span>}
+          <span className="truncate">{label}</span>
         </label>
       )}
       <div className="relative">
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          className="w-full bg-slate-50 border border-slate-200/80 hover:bg-slate-100/60 text-[#333333] text-xs font-bold rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#EE1D23] transition-all cursor-pointer flex items-center justify-between shadow-2xs"
+          className="w-full h-10 bg-slate-50 border border-slate-200/80 hover:bg-slate-100/60 text-[#333333] text-xs font-bold rounded-xl px-3 outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#EE1D23] transition-all cursor-pointer flex items-center justify-between shadow-2xs"
         >
           <span className="truncate pr-2">{displayValue}</span>
           <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform shrink-0", isOpen && "rotate-180")} />
@@ -144,6 +146,14 @@ export function MultiFilterSelect({
                         <span className={cn("text-xs font-bold truncate", isSelected ? "text-[#EE1D23]" : "text-slate-700")}>
                           {optLabel}
                         </span>
+                        {optionCounts && opt !== 'Todos' && optionCounts[opt] !== undefined && (
+                          <span className={cn(
+                            "ml-auto text-[10px] font-black px-1.5 py-0.5 rounded-md shrink-0 transition-colors",
+                            isSelected ? "bg-red-100 text-[#EE1D23]" : "bg-slate-100 text-slate-500"
+                          )}>
+                            {optionCounts[opt].toLocaleString()}
+                          </span>
+                        )}
                       </div>
                     );
                   })

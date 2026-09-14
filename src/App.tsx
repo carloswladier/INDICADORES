@@ -36,7 +36,8 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeft,
-  UserMinus
+  UserMinus,
+  Network
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -65,6 +66,7 @@ import LOGDashboard from './components/LOGDashboard';
 import OutageDashboard, { OutageEvent } from './components/OutageDashboard';
 import Revisita30DDashboard from './components/Revisita30DDashboard';
 import ChurnDashboard from './components/ChurnDashboard';
+import QoeGponDashboard from './components/QoeGponDashboard';
 
 // Diário de Bordo Types
 interface LogEntry {
@@ -955,7 +957,7 @@ export default function App() {
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [showScrollTop, setShowScrollTop] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'outage' | 'at5' | 'churn' | 'log' | 'revisita30d' | 'logbook'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'outage' | 'qoe-gpon' | 'at5' | 'churn' | 'log' | 'revisita30d' | 'logbook'>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem('CLARO_SIDEBAR_COLLAPSED') === 'true';
@@ -1952,8 +1954,16 @@ export default function App() {
               if (importedBaseCidade.length > 0) {
                 setBaseCidadeData(importedBaseCidade);
               }
+
+              // Determine current month or latest month in imported data
+              const monthsInMapped = Array.from(new Set(mappedData.map(d => d.mes).filter(Boolean))) as string[];
+              const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+              const calendarMonth = monthNames[new Date().getMonth()] || 'Setembro';
+              const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+              const matchedMonth = monthsInMapped.find(m => norm(m) === norm(calendarMonth)) || monthsInMapped[monthsInMapped.length - 1] || 'Todos';
+
               setFilters({
-                mes: ['Todos'],
+                mes: matchedMonth !== 'Todos' ? [matchedMonth] : ['Todos'],
                 semana: ['Todos'],
                 cidade: ['Todos'],
                 area: ['Todos'],
@@ -2140,6 +2150,22 @@ export default function App() {
                 >
                   <Radio className={cn("w-4 h-4 shrink-0", activeTab === 'outage' ? "text-white" : "text-[#EE1D23]")} />
                   {!isSidebarCollapsed && <span>OUTAGE</span>}
+                </button>
+
+                {/* QOE GPON */}
+                <button
+                  onClick={() => setActiveTab('qoe-gpon')}
+                  title="QOE GPON"
+                  className={cn(
+                    "flex items-center gap-2.5 px-2.5 py-2 rounded-xl font-black uppercase italic text-[11px] tracking-wide transition-all active:scale-95 whitespace-nowrap w-full text-left cursor-pointer",
+                    isSidebarCollapsed ? "md:justify-center md:px-0" : "",
+                    activeTab === 'qoe-gpon'
+                      ? "bg-[#EE1D23] text-white shadow-md shadow-red-500/25"
+                      : "bg-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-100/80"
+                  )}
+                >
+                  <Network className={cn("w-4 h-4 shrink-0", activeTab === 'qoe-gpon' ? "text-white" : "text-[#EE1D23]")} />
+                  {!isSidebarCollapsed && <span>QOE GPON</span>}
                 </button>
 
                 {/* AT5 */}
@@ -2743,7 +2769,7 @@ export default function App() {
             </div>
             <div className="h-[280px] w-full min-h-[280px]">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <ComposedChart data={dailyVolume} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+                <ComposedChart data={dailyVolume} margin={{ top: 25, right: 30, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#EE1D23" stopOpacity={0.1}/>
@@ -2755,9 +2781,8 @@ export default function App() {
                     dataKey="name" 
                     axisLine={false} 
                     tickLine={false} 
-                    tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }}
-                    interval="preserveStartEnd"
-                    minTickGap={10}
+                    tick={{ fill: '#64748B', fontSize: 9.5, fontWeight: 800 }}
+                    interval={0}
                   />
                   <YAxis 
                     axisLine={false} 
@@ -2826,28 +2851,48 @@ export default function App() {
                         const { x, y, value, index } = props;
                         if (value === null || value === undefined || value === 0) return null;
                         
-                        // Show labels only for local peaks or every few points
-                        const isLast = index === dailyVolume.length - 1;
+                        // Check if adjacent points are close in Y to alternate vertical offset and prevent overlapping
                         const prevVal = (index > 0 && dailyVolume[index - 1]) ? dailyVolume[index - 1].value : null;
                         const nextVal = (index < dailyVolume.length - 1 && dailyVolume[index + 1]) ? dailyVolume[index + 1].value : null;
                         
-                        // Simple peak detection
-                        const isPeak = (prevVal === null || value > prevVal) && (nextVal === null || value > nextVal);
-                        const isStep = index % 4 === 0;
-
-                        if (!isPeak && !isLast && !isStep) return null;
+                        const isCloseToNeighbor = 
+                          (prevVal !== null && Math.abs(value - prevVal) < 140) ||
+                          (nextVal !== null && Math.abs(value - nextVal) < 140);
+                        
+                        const isElevated = isCloseToNeighbor && (index % 2 === 1);
+                        const labelY = isElevated ? y - 22 : y - 10;
 
                         return (
-                          <text 
-                            x={x} 
-                            y={y - 12} 
-                            fill="#EE1D23" 
-                            fontSize={10} 
-                            fontWeight={900} 
-                            textAnchor="middle"
-                          >
-                            {value}
-                          </text>
+                          <g key={`daily-val-app-${index}`}>
+                            {isElevated && (
+                              <line 
+                                x1={x} 
+                                y1={y - 4} 
+                                x2={x} 
+                                y2={labelY + 8} 
+                                stroke="#EE1D23" 
+                                strokeWidth={1} 
+                                strokeDasharray="2 2"
+                                opacity={0.45} 
+                              />
+                            )}
+                            <text 
+                              x={x} 
+                              y={labelY} 
+                              fill="#EE1D23" 
+                              fontSize={9.5} 
+                              fontWeight={900} 
+                              textAnchor="middle"
+                              style={{
+                                paintOrder: 'stroke fill',
+                                stroke: '#ffffff',
+                                strokeWidth: 2.5,
+                                strokeLinejoin: 'round'
+                              }}
+                            >
+                              {value}
+                            </text>
+                          </g>
                         );
                       }}
                     />
@@ -3617,9 +3662,14 @@ export default function App() {
             <OutageDashboard 
               at1DailyVolume={dailyVolume}
               at1ComparisonMonths={comparisonMonths}
+              at1Data={baseData}
               data={sharedOutageData}
               onDataChange={setSharedOutageData}
             />
+          </div>
+
+          <div className={activeTab === 'qoe-gpon' ? 'block' : 'hidden'}>
+            <QoeGponDashboard />
           </div>
 
           <div className={activeTab === 'at5' ? 'block' : 'hidden'}>

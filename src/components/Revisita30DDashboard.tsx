@@ -27,7 +27,15 @@ import {
   Loader2, 
   RefreshCw,
   Users,
-  Compass
+  Compass,
+  Settings,
+  Link as LinkIcon,
+  ExternalLink,
+  FileCheck2,
+  BarChart2,
+  Sparkles,
+  ArrowUpRight,
+  ArrowDownRight
 } from 'lucide-react';
 import { MultiFilterSelect } from './MultiFilterSelect';
 import { motion, AnimatePresence } from 'motion/react';
@@ -42,10 +50,24 @@ import {
   Cell, 
   LineChart, 
   Line, 
-  LabelList 
+  LabelList,
+  ComposedChart,
+  Area,
+  Legend
 } from 'recharts';
 import { cn, formatPercent, formatDecimal, formatInteger } from '../lib/utils';
-import { getGithubRevisitaUrl, normalizeGithubRawUrl, fetchGithubFileArrayBuffer } from '../lib/githubSync';
+import { 
+  getGithubRevisitaUrl, 
+  getGithubRevisitaJanJunUrl, 
+  getGithubRevisitaJulDezUrl, 
+  normalizeGithubRawUrl, 
+  fetchGithubFileArrayBuffer 
+} from '../lib/githubSync';
+
+export const MONTH_ORDER = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
 
 export interface Revisita30DRow {
   contrato: string;
@@ -57,7 +79,48 @@ export interface Revisita30DRow {
   codigoBaixa: string;
   qtdRevisitas: number; // 0 = Com Padrão, 1 = Sem Padrão
   dataBaixa: string;
+  mes: string;
 }
+
+export const parseMonthFromValue = (rawMes: any, parsedDate?: Date | null, fileName?: string): string => {
+  if (rawMes !== undefined && rawMes !== null && String(rawMes).trim() !== '') {
+    const s = String(rawMes).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (s.startsWith('jan')) return 'Janeiro';
+    if (s.startsWith('fev') || s.startsWith('feb')) return 'Fevereiro';
+    if (s.startsWith('mar')) return 'Março';
+    if (s.startsWith('abr') || s.startsWith('apr')) return 'Abril';
+    if (s.startsWith('mai') || s.startsWith('may')) return 'Maio';
+    if (s.startsWith('jun')) return 'Junho';
+    if (s.startsWith('jul')) return 'Julho';
+    if (s.startsWith('ago') || s.startsWith('aug')) return 'Agosto';
+    if (s.startsWith('set') || s.startsWith('sep')) return 'Setembro';
+    if (s.startsWith('out') || s.startsWith('oct')) return 'Outubro';
+    if (s.startsWith('nov')) return 'Novembro';
+    if (s.startsWith('dez') || s.startsWith('dec')) return 'Dezembro';
+
+    const num = parseInt(s, 10);
+    if (!isNaN(num) && num >= 1 && num <= 12) {
+      return MONTH_ORDER[num - 1];
+    }
+  }
+
+  if (parsedDate && !isNaN(parsedDate.getTime())) {
+    const m = parsedDate.getUTCMonth();
+    if (m >= 0 && m < 12) return MONTH_ORDER[m];
+  }
+
+  if (fileName) {
+    const fn = fileName.toLowerCase();
+    if (fn.includes('jan_jun') || fn.includes('jan-jun') || fn.includes('janjun')) {
+      return 'Janeiro';
+    }
+    if (fn.includes('jul_dez') || fn.includes('jul-dez') || fn.includes('juldez')) {
+      return 'Julho';
+    }
+  }
+
+  return 'Setembro';
+};
 
 // Function to clean baixa codes by stripping trailing/leading 0 ( ), (1), (0), ( ), etc.
 export const cleanBaixaCode = (code: string | undefined | null): string => {
@@ -148,6 +211,9 @@ const generateMockRevisita30DData = (): Revisita30DRow[] => {
       const emp = i % 4 === 0 ? empresasList[(i + 1) % empresasList.length] : empresa;
       const tipo = tiposOS[i % tiposOS.length];
       const cod = codigosNormais[i % codigosNormais.length];
+      const mockMonths = ['Julho', 'Agosto', 'Setembro'];
+      const mes = mockMonths[i % mockMonths.length];
+      const mNum = mes === 'Julho' ? '07' : mes === 'Agosto' ? '08' : '09';
 
       result.push({
         contrato: String(contractSeq),
@@ -158,7 +224,8 @@ const generateMockRevisita30DData = (): Revisita30DRow[] => {
         loginTecnico: tec,
         codigoBaixa: cod,
         qtdRevisitas: 0,
-        dataBaixa: `${String(day).padStart(2, '0')}/08`
+        dataBaixa: `${String(day).padStart(2, '0')}/${mNum}`,
+        mes
       });
     }
 
@@ -170,6 +237,9 @@ const generateMockRevisita30DData = (): Revisita30DRow[] => {
       const emp = i % 3 === 0 ? empresasList[(i + 2) % empresasList.length] : empresa;
       const tipo = tiposOS[i % 3]; // Revisit often in Reparo / Instalação
       const cod = codigosOfensores[i % codigosOfensores.length];
+      const mockMonths = ['Julho', 'Agosto', 'Setembro'];
+      const mes = mockMonths[i % mockMonths.length];
+      const mNum = mes === 'Julho' ? '07' : mes === 'Agosto' ? '08' : '09';
 
       result.push({
         contrato: String(contractSeq),
@@ -180,7 +250,8 @@ const generateMockRevisita30DData = (): Revisita30DRow[] => {
         loginTecnico: tec,
         codigoBaixa: cod,
         qtdRevisitas: 1,
-        dataBaixa: `${String(day).padStart(2, '0')}/08`
+        dataBaixa: `${String(day).padStart(2, '0')}/${mNum}`,
+        mes
       });
     }
   });
@@ -200,14 +271,20 @@ export default function Revisita30DDashboard() {
   const [importProgress, setImportProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  // GitHub loader states
-  const [githubUrl, setGithubUrl] = useState('');
+  // Loaded files tracker & sync feedback
+  const [loadedFiles, setLoadedFiles] = useState<string[]>([]);
+  const [syncStatus, setSyncStatus] = useState<{ type: 'success' | 'error' | 'info' | 'warning'; message: string } | null>(null);
+
+  // GitHub loader states (supports both Jan-Jun and Jul-Dez)
+  const [githubJanJunUrl, setGithubJanJunUrl] = useState('');
+  const [githubJulDezUrl, setGithubJulDezUrl] = useState('');
   const [isGithubLoading, setIsGithubLoading] = useState(false);
   const [showGithubInput, setShowGithubInput] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Filters State
   const [filters, setFilters] = useState<{
+    mes: string[];
     municipio: string[];
     tipoOs: string[];
     empresa: string[];
@@ -216,6 +293,7 @@ export default function Revisita30DDashboard() {
     startDate: string;
     endDate: string;
   }>({
+    mes: [],
     municipio: [],
     tipoOs: [],
     empresa: [],
@@ -229,7 +307,7 @@ export default function Revisita30DDashboard() {
   const [tableSearch, setTableSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
-  const [sortField, setSortField] = useState<'municipio' | 'qtdRevisitas' | 'empresa' | 'unidadeNegocio' | 'tipoOs' | 'dataBaixa'>('dataBaixa');
+  const [sortField, setSortField] = useState<'municipio' | 'qtdRevisitas' | 'empresa' | 'unidadeNegocio' | 'tipoOs' | 'dataBaixa' | 'mes'>('dataBaixa');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   // UN chart state
@@ -243,6 +321,9 @@ export default function Revisita30DDashboard() {
   const [techMetric, setTechMetric] = useState<'nota' | 'semPadrao'>('nota');
   const [techSort, setTechSort] = useState<'nota' | 'semPadrao' | 'volume'>('nota');
 
+  // Monthly chart state
+  const [mensalViewMode, setMensalViewMode] = useState<'bar' | 'composed' | 'line'>('bar');
+
   // Clear any legacy localStorage data on mount to ensure fresh state
   useEffect(() => {
     try {
@@ -252,251 +333,326 @@ export default function Revisita30DDashboard() {
     }
   }, []);
 
-  // Generic Excel processor supporting exact column mappings (ESTR_MUNICIPIO, NM_EMPRESA_NEW, NM_UN_NEW, NR_CONTRATO, QTD_REVISITAS)
-  const processExcelData = (ab: ArrayBuffer): boolean => {
-    try {
-      const wb = XLSX.read(ab, { type: 'array' });
+  // Helper to deduplicate and merge two dataset arrays
+  const mergeDatasets = (base: Revisita30DRow[], incoming: Revisita30DRow[]): Revisita30DRow[] => {
+    const seen = new Set<string>();
+    const merged: Revisita30DRow[] = [];
+
+    for (const row of [...base, ...incoming]) {
+      const key = `${row.contrato}_${row.dataBaixa}_${row.codigoBaixa}_${row.tipoOs}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(row);
+      }
+    }
+    return merged;
+  };
+
+  // Pure Excel buffer parser that extracts Revisita30DRow[] with automatic column matching & month extraction
+  const parseExcelBuffer = (ab: ArrayBuffer, fileName?: string): Revisita30DRow[] => {
+    const wb = XLSX.read(ab, { type: 'array' });
+    if (!wb.SheetNames || wb.SheetNames.length === 0) {
+      throw new Error('Nenhuma planilha encontrada no arquivo.');
+    }
+
+    // 1. Select the best worksheet by scoring headers across all sheets
+    let targetSheetName = wb.SheetNames[0];
+    let highestScore = -1;
+    let headerRowIndex = 0;
+
+    for (const sheetName of wb.SheetNames) {
+      const wsTest = wb.Sheets[sheetName];
+      if (!wsTest) continue;
+      const matrix = XLSX.utils.sheet_to_json(wsTest, { header: 1, defval: '' }) as any[][];
+      if (!matrix || matrix.length === 0) continue;
+
+      for (let r = 0; r < Math.min(15, matrix.length); r++) {
+        const rowArr = matrix[r];
+        if (!Array.isArray(rowArr)) continue;
+        
+        const normalizedCols = rowArr.map(c => 
+          String(c || '')
+            .toUpperCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^A-Z0-9]/g, '')
+        );
+
+        let score = 0;
+        if (normalizedCols.includes('ESTRMUNICIPIO')) score += 15;
+        if (normalizedCols.includes('NMEMPRESANEW') || normalizedCols.includes('ANTNMEMPRESANEW')) score += 15;
+        if (normalizedCols.includes('NMUNNEW')) score += 15;
+        if (normalizedCols.includes('NRCONTRATO')) score += 15;
+        if (normalizedCols.includes('QTDREVISITAS') || normalizedCols.includes('QTDREVISITA')) score += 15;
+        if (normalizedCols.includes('WOTPATIVIDADE')) score += 8;
+        if (normalizedCols.includes('WOLOGINTEC')) score += 8;
+        if (normalizedCols.includes('CDBAIXAORDEMSERVICO')) score += 8;
+        if (normalizedCols.includes('DTBAIXAORDEMSERVICO')) score += 8;
+
+        if (normalizedCols.includes('MUNICIPIO') || normalizedCols.includes('CIDADE')) score += 6;
+        if (normalizedCols.includes('EMPRESA') || normalizedCols.includes('PARCEIRO')) score += 6;
+        if (normalizedCols.includes('CONTRATO') || normalizedCols.includes('OS')) score += 6;
+        if (normalizedCols.includes('REVISITAS') || normalizedCols.includes('REVISITA')) score += 6;
+        if (normalizedCols.includes('MES') || normalizedCols.includes('MESES') || normalizedCols.includes('MONTH')) score += 6;
+
+        if (score > highestScore) {
+          highestScore = score;
+          targetSheetName = sheetName;
+          headerRowIndex = r;
+        }
+      }
+    }
+
+    const ws = wb.Sheets[targetSheetName];
+    const rawMatrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as any[][];
+
+    if (!rawMatrix || rawMatrix.length <= headerRowIndex) {
+      throw new Error(`A planilha "${targetSheetName}" não contém linhas de dados.`);
+    }
+
+    // Build header map from detected header row
+    const headerRow = rawMatrix[headerRowIndex] as any[];
+    const colMap: Record<string, number> = {};
+
+    headerRow.forEach((colName, idx) => {
+      if (colName !== undefined && colName !== null) {
+        const rawStr = String(colName).trim();
+        const cleanKey = rawStr
+          .toUpperCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^A-Z0-9]/g, '');
+        if (cleanKey) {
+          colMap[cleanKey] = idx;
+        }
+      }
+    });
+
+    const findColIdx = (candidateList: string[]): number => {
+      for (const cand of candidateList) {
+        const cleanCand = cand
+          .toUpperCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^A-Z0-9]/g, '');
+        
+        if (colMap[cleanCand] !== undefined) {
+          return colMap[cleanCand];
+        }
+      }
+
+      for (const cand of candidateList) {
+        const cleanCand = cand
+          .toUpperCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^A-Z0-9]/g, '');
+        
+        const foundKey = Object.keys(colMap).find(k => k.includes(cleanCand) || cleanCand.includes(k));
+        if (foundKey && colMap[foundKey] !== undefined) {
+          return colMap[foundKey];
+        }
+      }
+
+      return -1;
+    };
+
+    const idxMunicipio = findColIdx(['ESTR_MUNICIPIO', 'ESTRMUNICIPIO', 'ESTR_MUNICÍPIO', 'NM_MUNICIPIO', 'MUNICIPIO', 'MUNICÍPIO', 'CIDADE', 'ESTR_CIDADE']);
+    const idxEmpresa = findColIdx(['NM_EMPRESA_NEW', 'NMEMPRESANEW', 'ANT_NM_EMPRESA_NEW', 'ANTNMEMPRESANEW', 'EMPRESA_NEW', 'NM_EMPRESA', 'NMEMPRESA', 'ANT_EMPRESA', 'EMPRESA', 'PARCEIRO', 'CONTRATADA']);
+    const idxUn = findColIdx(['NM_UN_NEW', 'NMUNNEW', 'UNIDADE_NEGOCIO', 'UNIDADENEGOCIO', 'UNIDADE_NEGÓCIO', 'NM_UN', 'NMUN', 'UN_NEW', 'REGIONAL', 'UNIDADE']);
+    const idxContrato = findColIdx(['NR_CONTRATO', 'NRCONTRATO', 'NUM_CONTRATO', 'NUMCONTRATO', 'NUMERO_CONTRATO', 'CONTRATO', 'NR_OS', 'NROS', 'NUM_OS', 'NUMOS', 'OS', 'WO_NUMBER', 'ID_OS']);
+    const idxRevisitas = findColIdx(['QTD_REVISITAS', 'QTDREVISITAS', 'QTD_REVISITA', 'QTDREVISITA', 'QT_REVISITAS', 'REVISITAS', 'REVISITA', 'SEM_PADRAO', 'IS_REVISITA', 'FLAG_REVISITA']);
+    const idxTipoOs = findColIdx(['WO_TP_ATIVIDADE', 'WOTPATIVIDADE', 'TP_ATIVIDADE', 'TIPO_OS', 'TIPOOS', 'TIPO_ATIVIDADE', 'WO_TIPO', 'TIPO', 'SERVICO', 'ATIVIDADE']);
+    const idxLoginTec = findColIdx(['WO_LOGIN_TEC', 'WOLOGINTEC', 'LOGIN_TEC', 'LOGINTEC', 'LOGIN_TECNICO', 'NM_TECNICO', 'TECNICO', 'LOGIN', 'MATRICULA', 'WO_TEC']);
+    const idxBaixa = findColIdx(['CD_BAIXA_ORDEM_SERVICO', 'CDBAIXAORDEMSERVICO', 'CODIGO_BAIXA', 'CODIGOBAIXA', 'CD_BAIXA', 'CDBAIXA', 'DS_BAIXA', 'MOTIVO_BAIXA', 'BAIXA']);
+    const idxDataBaixa = findColIdx(['DT_BAIXA_ORDEM_SERVICO', 'DTBAIXAORDEMSERVICO', 'DT_BAIXA', 'DTBAIXA', 'DATA_BAIXA', 'DATA', 'DT_OS', 'FECHAMENTO']);
+    const idxMes = findColIdx(['MES', 'MÊS', 'NM_MES', 'NMMES', 'MES_ANO', 'MESANO', 'MES_BAIXA', 'MESBAIXA', 'MONTH']);
+
+    const formatCityName = (raw: string): string => {
+      if (!raw) return 'NÃO INFORMADO';
+      const str = raw.trim();
+      const upper = str.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       
-      if (!wb.SheetNames || wb.SheetNames.length === 0) {
-        setError('Nenhuma planilha encontrada no arquivo.');
-        setIsLoading(false);
-        return false;
-      }
+      if (upper === 'ANANINDEUA') return 'Ananindeua';
+      if (upper === 'BELEM') return 'Belém';
+      if (upper === 'BOA VISTA') return 'Boa Vista';
+      if (upper === 'CASTANHAL') return 'Castanhal';
+      if (upper === 'CAXIAS') return 'Caxias';
+      if (upper === 'IMPERATRIZ') return 'Imperatriz';
+      if (upper === 'MACAPA') return 'Macapá';
+      if (upper === 'MANAUS') return 'Manaus';
+      if (upper === 'MARABA') return 'Marabá';
+      if (upper === 'PARAGOMINAS') return 'Paragominas';
+      if (upper === 'PARAUAPEBAS') return 'Parauapebas';
+      if (upper === 'SANTANA') return 'Santana';
+      if (upper === 'SAO LUIS' || upper === 'SAO LUIZ') return 'São Luís';
+      if (upper === 'TIMON') return 'Timon';
+      
+      return str
+        .toLowerCase()
+        .split(' ')
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+    };
 
-      // 1. Select the best worksheet by scoring headers across all sheets
-      let targetSheetName = wb.SheetNames[0];
-      let highestScore = -1;
-      let headerRowIndex = 0;
+    const parsedData: Revisita30DRow[] = [];
 
-      for (const sheetName of wb.SheetNames) {
-        const wsTest = wb.Sheets[sheetName];
-        if (!wsTest) continue;
-        const matrix = XLSX.utils.sheet_to_json(wsTest, { header: 1, defval: '' }) as any[][];
-        if (!matrix || matrix.length === 0) continue;
+    for (let r = headerRowIndex + 1; r < rawMatrix.length; r++) {
+      const rowArr = rawMatrix[r];
+      if (!rowArr || rowArr.length === 0) continue;
 
-        for (let r = 0; r < Math.min(15, matrix.length); r++) {
-          const rowArr = matrix[r];
-          if (!Array.isArray(rowArr)) continue;
-          
-          const normalizedCols = rowArr.map(c => 
-            String(c || '')
-              .toUpperCase()
-              .normalize('NFD')
-              .replace(/[\u0300-\u036f]/g, '')
-              .replace(/[^A-Z0-9]/g, '')
-          );
+      const rawMun = idxMunicipio >= 0 ? String(rowArr[idxMunicipio] || '').trim() : '';
+      const rawEmp = idxEmpresa >= 0 ? String(rowArr[idxEmpresa] || '').trim() : '';
+      const rawUn = idxUn >= 0 ? String(rowArr[idxUn] || '').trim() : '';
+      const rawCtr = idxContrato >= 0 ? String(rowArr[idxContrato] || '').trim() : '';
+      const rawRev = idxRevisitas >= 0 ? rowArr[idxRevisitas] : '';
+      const rawTipo = idxTipoOs >= 0 ? String(rowArr[idxTipoOs] || '').trim() : '';
+      const rawTec = idxLoginTec >= 0 ? String(rowArr[idxLoginTec] || '').trim() : '';
+      const rawBaixa = idxBaixa >= 0 ? String(rowArr[idxBaixa] || '').trim() : '';
+      const rawData = idxDataBaixa >= 0 ? rowArr[idxDataBaixa] : '';
+      const rawMes = idxMes >= 0 ? rowArr[idxMes] : '';
 
-          let score = 0;
-          if (normalizedCols.includes('ESTRMUNICIPIO')) score += 15;
-          if (normalizedCols.includes('NMEMPRESANEW') || normalizedCols.includes('ANTNMEMPRESANEW')) score += 15;
-          if (normalizedCols.includes('NMUNNEW')) score += 15;
-          if (normalizedCols.includes('NRCONTRATO')) score += 15;
-          if (normalizedCols.includes('QTDREVISITAS') || normalizedCols.includes('QTDREVISITA')) score += 15;
-          if (normalizedCols.includes('WOTPATIVIDADE')) score += 8;
-          if (normalizedCols.includes('WOLOGINTEC')) score += 8;
-          if (normalizedCols.includes('CDBAIXAORDEMSERVICO')) score += 8;
-          if (normalizedCols.includes('DTBAIXAORDEMSERVICO')) score += 8;
+      if (!rawMun && !rawCtr && !rawEmp) continue;
+      if (rawMun.toUpperCase().includes('TOTAL GERAL') || rawMun.toUpperCase().includes('TOTAL')) continue;
 
-          // Also check for secondary variations
-          if (normalizedCols.includes('MUNICIPIO') || normalizedCols.includes('CIDADE')) score += 6;
-          if (normalizedCols.includes('EMPRESA') || normalizedCols.includes('PARCEIRO')) score += 6;
-          if (normalizedCols.includes('CONTRATO') || normalizedCols.includes('OS')) score += 6;
-          if (normalizedCols.includes('REVISITAS') || normalizedCols.includes('REVISITA')) score += 6;
-
-          if (score > highestScore) {
-            highestScore = score;
-            targetSheetName = sheetName;
-            headerRowIndex = r;
-          }
-        }
-      }
-
-      const ws = wb.Sheets[targetSheetName];
-      const rawMatrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as any[][];
-
-      if (!rawMatrix || rawMatrix.length <= headerRowIndex) {
-        setError(`A planilha "${targetSheetName}" não contém dados válidos.`);
-        setIsLoading(false);
-        return false;
-      }
-
-      // Build header map from detected header row
-      const headerRow = rawMatrix[headerRowIndex] as any[];
-      const colMap: Record<string, number> = {};
-
-      headerRow.forEach((colName, idx) => {
-        if (colName !== undefined && colName !== null) {
-          const rawStr = String(colName).trim();
-          const cleanKey = rawStr
-            .toUpperCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/[^A-Z0-9]/g, '');
-          if (cleanKey) {
-            colMap[cleanKey] = idx;
-          }
-        }
-      });
-
-      const findColIdx = (candidateList: string[]): number => {
-        for (const cand of candidateList) {
-          const cleanCand = cand
-            .toUpperCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/[^A-Z0-9]/g, '');
-          
-          // Exact match
-          if (colMap[cleanCand] !== undefined) {
-            return colMap[cleanCand];
-          }
-        }
-
-        // Secondary partial search
-        for (const cand of candidateList) {
-          const cleanCand = cand
-            .toUpperCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/[^A-Z0-9]/g, '');
-          
-          const foundKey = Object.keys(colMap).find(k => k.includes(cleanCand) || cleanCand.includes(k));
-          if (foundKey && colMap[foundKey] !== undefined) {
-            return colMap[foundKey];
-          }
-        }
-
-        return -1;
-      };
-
-      // Column Indices
-      const idxMunicipio = findColIdx(['ESTR_MUNICIPIO', 'ESTRMUNICIPIO', 'ESTR_MUNICÍPIO', 'NM_MUNICIPIO', 'MUNICIPIO', 'MUNICÍPIO', 'CIDADE', 'ESTR_CIDADE']);
-      const idxEmpresa = findColIdx(['NM_EMPRESA_NEW', 'NMEMPRESANEW', 'ANT_NM_EMPRESA_NEW', 'ANTNMEMPRESANEW', 'EMPRESA_NEW', 'NM_EMPRESA', 'NMEMPRESA', 'ANT_EMPRESA', 'EMPRESA', 'PARCEIRO', 'CONTRATADA']);
-      const idxUn = findColIdx(['NM_UN_NEW', 'NMUNNEW', 'UNIDADE_NEGOCIO', 'UNIDADENEGOCIO', 'UNIDADE_NEGÓCIO', 'NM_UN', 'NMUN', 'UN_NEW', 'REGIONAL', 'UNIDADE']);
-      const idxContrato = findColIdx(['NR_CONTRATO', 'NRCONTRATO', 'NUM_CONTRATO', 'NUMCONTRATO', 'NUMERO_CONTRATO', 'CONTRATO', 'NR_OS', 'NROS', 'NUM_OS', 'NUMOS', 'OS', 'WO_NUMBER', 'ID_OS']);
-      const idxRevisitas = findColIdx(['QTD_REVISITAS', 'QTDREVISITAS', 'QTD_REVISITA', 'QTDREVISITA', 'QT_REVISITAS', 'REVISITAS', 'REVISITA', 'SEM_PADRAO', 'IS_REVISITA', 'FLAG_REVISITA']);
-      const idxTipoOs = findColIdx(['WO_TP_ATIVIDADE', 'WOTPATIVIDADE', 'TP_ATIVIDADE', 'TIPO_OS', 'TIPOOS', 'TIPO_ATIVIDADE', 'WO_TIPO', 'TIPO', 'SERVICO', 'ATIVIDADE']);
-      const idxLoginTec = findColIdx(['WO_LOGIN_TEC', 'WOLOGINTEC', 'LOGIN_TEC', 'LOGINTEC', 'LOGIN_TECNICO', 'NM_TECNICO', 'TECNICO', 'LOGIN', 'MATRICULA', 'WO_TEC']);
-      const idxBaixa = findColIdx(['CD_BAIXA_ORDEM_SERVICO', 'CDBAIXAORDEMSERVICO', 'CODIGO_BAIXA', 'CODIGOBAIXA', 'CD_BAIXA', 'CDBAIXA', 'DS_BAIXA', 'MOTIVO_BAIXA', 'BAIXA']);
-      const idxDataBaixa = findColIdx(['DT_BAIXA_ORDEM_SERVICO', 'DTBAIXAORDEMSERVICO', 'DT_BAIXA', 'DTBAIXA', 'DATA_BAIXA', 'DATA', 'DT_OS', 'FECHAMENTO']);
-
-      // Format city name nicely (e.g. Belém, São Luís, Ananindeua)
-      const formatCityName = (raw: string): string => {
-        if (!raw) return 'NÃO INFORMADO';
-        const str = raw.trim();
-        const upper = str.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        
-        if (upper === 'ANANINDEUA') return 'Ananindeua';
-        if (upper === 'BELEM') return 'Belém';
-        if (upper === 'BOA VISTA') return 'Boa Vista';
-        if (upper === 'CASTANHAL') return 'Castanhal';
-        if (upper === 'CAXIAS') return 'Caxias';
-        if (upper === 'IMPERATRIZ') return 'Imperatriz';
-        if (upper === 'MACAPA') return 'Macapá';
-        if (upper === 'MANAUS') return 'Manaus';
-        if (upper === 'MARABA') return 'Marabá';
-        if (upper === 'PARAGOMINAS') return 'Paragominas';
-        if (upper === 'PARAUAPEBAS') return 'Parauapebas';
-        if (upper === 'SANTANA') return 'Santana';
-        if (upper === 'SAO LUIS' || upper === 'SAO LUIZ') return 'São Luís';
-        if (upper === 'TIMON') return 'Timon';
-        
-        // Capitalize words
-        return str
-          .toLowerCase()
-          .split(' ')
-          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(' ');
-      };
-
-      const parsedData: Revisita30DRow[] = [];
-
-      for (let r = headerRowIndex + 1; r < rawMatrix.length; r++) {
-        const rowArr = rawMatrix[r];
-        if (!rowArr || rowArr.length === 0) continue;
-
-        // Extract raw fields using resolved indices
-        const rawMun = idxMunicipio >= 0 ? String(rowArr[idxMunicipio] || '').trim() : '';
-        const rawEmp = idxEmpresa >= 0 ? String(rowArr[idxEmpresa] || '').trim() : '';
-        const rawUn = idxUn >= 0 ? String(rowArr[idxUn] || '').trim() : '';
-        const rawCtr = idxContrato >= 0 ? String(rowArr[idxContrato] || '').trim() : '';
-        const rawRev = idxRevisitas >= 0 ? rowArr[idxRevisitas] : '';
-        const rawTipo = idxTipoOs >= 0 ? String(rowArr[idxTipoOs] || '').trim() : '';
-        const rawTec = idxLoginTec >= 0 ? String(rowArr[idxLoginTec] || '').trim() : '';
-        const rawBaixa = idxBaixa >= 0 ? String(rowArr[idxBaixa] || '').trim() : '';
-        const rawData = idxDataBaixa >= 0 ? rowArr[idxDataBaixa] : '';
-
-        // Ignore empty / summary footer lines
-        if (!rawMun && !rawCtr && !rawEmp) continue;
-        if (rawMun.toUpperCase().includes('TOTAL GERAL') || rawMun.toUpperCase().includes('TOTAL')) continue;
-
-        // Parse QTD_REVISITAS (0 or 1)
-        let qtdRevisitas = 0;
-        if (rawRev !== undefined && rawRev !== null && rawRev !== '') {
-          const num = Number(rawRev);
-          if (!isNaN(num)) {
-            qtdRevisitas = num >= 1 ? 1 : 0;
+      let qtdRevisitas = 0;
+      if (rawRev !== undefined && rawRev !== null && rawRev !== '') {
+        const num = Number(rawRev);
+        if (!isNaN(num)) {
+          qtdRevisitas = num >= 1 ? 1 : 0;
+        } else {
+          const strVal = String(rawRev).toUpperCase().trim();
+          if (strVal === '1' || strVal === 'SIM' || strVal === 'S' || strVal.includes('SEM PADRAO') || strVal.includes('REVISITA')) {
+            qtdRevisitas = 1;
           } else {
-            const strVal = String(rawRev).toUpperCase().trim();
-            if (strVal === '1' || strVal === 'SIM' || strVal === 'S' || strVal.includes('SEM PADRAO') || strVal.includes('REVISITA')) {
-              qtdRevisitas = 1;
-            } else {
-              qtdRevisitas = 0;
-            }
+            qtdRevisitas = 0;
           }
         }
+      }
 
-        const municipio = formatCityName(rawMun);
-        const empresa = rawEmp ? rawEmp.toUpperCase() : 'CLARO / PRÓPRIA';
-        const unidadeNegocio = rawUn ? rawUn.toUpperCase() : 'UN NORTE';
-        const contrato = rawCtr ? rawCtr : String(208500000 + r);
-        const tipoOs = rawTipo ? rawTipo.toUpperCase() : 'REPARO FTTH';
-        const loginTecnico = rawTec ? rawTec.toUpperCase() : 'TEC_SEM_LOGIN';
-        const codigoBaixa = rawBaixa ? cleanBaixaCode(rawBaixa).toUpperCase() : 'BAIXA CONCLUÍDA';
+      const municipio = formatCityName(rawMun);
+      const empresa = rawEmp ? rawEmp.toUpperCase() : 'CLARO / PRÓPRIA';
+      const unidadeNegocio = rawUn ? rawUn.toUpperCase() : 'UN NORTE';
+      const contrato = rawCtr ? rawCtr : String(208500000 + r);
+      const tipoOs = rawTipo ? rawTipo.toUpperCase() : 'REPARO FTTH';
+      const loginTecnico = rawTec ? rawTec.toUpperCase() : 'TEC_SEM_LOGIN';
+      const codigoBaixa = rawBaixa ? cleanBaixaCode(rawBaixa).toUpperCase() : 'BAIXA CONCLUÍDA';
 
-        // Parse date
-        let dataBaixa = `${String(((r - headerRowIndex) % 28) + 1).padStart(2, '0')}/08`;
-        if (rawData) {
-          if (rawData instanceof Date) {
-            const d = String(rawData.getUTCDate()).padStart(2, '0');
-            const m = String(rawData.getUTCMonth() + 1).padStart(2, '0');
-            dataBaixa = `${d}/${m}`;
-          } else if (typeof rawData === 'number') {
-            const dateObj = new Date(Math.round((rawData - (25567 + 2)) * 86400 * 1000));
-            const d = String(dateObj.getUTCDate()).padStart(2, '0');
-            const m = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
-            dataBaixa = `${d}/${m}`;
+      let dataBaixa = `${String(((r - headerRowIndex) % 28) + 1).padStart(2, '0')}/08`;
+      let parsedDate: Date | null = null;
+      if (rawData) {
+        if (rawData instanceof Date) {
+          parsedDate = rawData;
+          const d = String(rawData.getUTCDate()).padStart(2, '0');
+          const m = String(rawData.getUTCMonth() + 1).padStart(2, '0');
+          dataBaixa = `${d}/${m}`;
+        } else if (typeof rawData === 'number') {
+          const dateObj = new Date(Math.round((rawData - (25567 + 2)) * 86400 * 1000));
+          parsedDate = dateObj;
+          const d = String(dateObj.getUTCDate()).padStart(2, '0');
+          const m = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+          dataBaixa = `${d}/${m}`;
+        } else {
+          const strVal = String(rawData).trim();
+          const dateIso = strVal.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+          if (dateIso) {
+            const y = parseInt(dateIso[1]);
+            const m = parseInt(dateIso[2]);
+            const d = parseInt(dateIso[3]);
+            parsedDate = new Date(Date.UTC(y, m - 1, d));
+            dataBaixa = `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}`;
           } else {
-            const strVal = String(rawData).trim();
-            const dateMatch = strVal.match(/(\d{1,2})[\/\-](\d{1,2})/);
+            const dateMatch = strVal.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
             if (dateMatch) {
-              dataBaixa = `${dateMatch[1].padStart(2, '0')}/${dateMatch[2].padStart(2, '0')}`;
+              const d = parseInt(dateMatch[1]);
+              const m = parseInt(dateMatch[2]);
+              const y = dateMatch[3] ? parseInt(dateMatch[3].length === 2 ? `20${dateMatch[3]}` : dateMatch[3]) : 2026;
+              parsedDate = new Date(Date.UTC(y, m - 1, d));
+              dataBaixa = `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}`;
             }
           }
         }
-
-        parsedData.push({
-          contrato,
-          municipio,
-          tipoOs,
-          empresa,
-          unidadeNegocio,
-          loginTecnico,
-          codigoBaixa,
-          qtdRevisitas,
-          dataBaixa
-        });
       }
 
-      if (parsedData.length === 0) {
-        setError('Não foi possível extrair dados válidos da planilha. Verifique se as colunas ESTR_MUNICIPIO, NM_EMPRESA_NEW, NM_UN_NEW, NR_CONTRATO e QTD_REVISITAS estão presentes.');
-        setIsLoading(false);
+      const mes = parseMonthFromValue(rawMes, parsedDate, fileName);
+
+      parsedData.push({
+        contrato,
+        municipio,
+        tipoOs,
+        empresa,
+        unidadeNegocio,
+        loginTecnico,
+        codigoBaixa,
+        qtdRevisitas,
+        dataBaixa,
+        mes
+      });
+    }
+
+    return parsedData;
+  };
+
+  // Helper for processing 1 or multiple Excel files
+  const processFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    setIsImporting(true);
+    setIsLoading(true);
+    setError(null);
+    setSyncStatus(null);
+    setImportProgress(15);
+
+    try {
+      let combined: Revisita30DRow[] = [];
+      const fileSummaries: string[] = [];
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setImportProgress(Math.round(15 + ((i + 0.5) / files.length) * 70));
+        const buffer = await file.arrayBuffer();
+        const parsed = parseExcelBuffer(buffer, file.name);
+        if (parsed.length > 0) {
+          combined = mergeDatasets(combined, parsed);
+          fileSummaries.push(`${file.name} (${formatInteger(parsed.length)} OS)`);
+        }
+      }
+
+      if (combined.length === 0) {
+        throw new Error('Nenhum dado válido pôde ser extraído dos arquivos selecionados.');
+      }
+
+      setData(combined);
+      setLoadedFiles(fileSummaries);
+      setSyncStatus({
+        type: 'success',
+        message: `${files.length} arquivo${files.length > 1 ? 's' : ''} importado${files.length > 1 ? 's' : ''} com sucesso: ${fileSummaries.join(' + ')} (Total: ${formatInteger(combined.length)} OS).`
+      });
+      setImportProgress(100);
+      setTimeout(() => {
         setIsImporting(false);
-        setImportProgress(0);
+      }, 400);
+    } catch (err: any) {
+      console.error('[Revisita30D] Error processing files:', err);
+      setError(err.message || 'Erro ao processar arquivos Excel.');
+      setIsImporting(false);
+      setImportProgress(0);
+    } finally {
+      setIsLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const processExcelData = (ab: ArrayBuffer, fileName?: string): boolean => {
+    try {
+      const parsed = parseExcelBuffer(ab, fileName);
+      if (parsed.length === 0) {
+        setError('Não foi possível extrair dados válidos da planilha.');
         return false;
       }
-
-      setData(parsedData);
+      setData(parsed);
+      if (fileName) {
+        setLoadedFiles([`${fileName} (${formatInteger(parsed.length)} OS)`]);
+      }
       setError(null);
       setIsLoading(false);
       setImportProgress(100);
@@ -514,88 +670,119 @@ export default function Revisita30DDashboard() {
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsImporting(true);
-    setImportProgress(25);
-    setIsLoading(true);
-    setError(null);
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      setImportProgress(65);
-      const buffer = evt.target?.result as ArrayBuffer;
-      processExcelData(buffer);
-    };
-    reader.onerror = () => {
-      setError('Erro ao ler o arquivo selecionado.');
-      setIsLoading(false);
-      setIsImporting(false);
-      setImportProgress(0);
-    };
-    reader.readAsArrayBuffer(file);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    await processFiles(files);
   };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop: (acceptedFiles) => {
+    onDrop: async (acceptedFiles) => {
       if (acceptedFiles.length === 0) return;
-      setIsImporting(true);
-      setImportProgress(25);
-      setIsLoading(true);
-      setError(null);
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        setImportProgress(65);
-        const buffer = evt.target?.result as ArrayBuffer;
-        processExcelData(buffer);
-      };
-      reader.onerror = () => {
-        setError('Erro ao ler arquivo arrastado.');
-        setIsLoading(false);
-        setIsImporting(false);
-        setImportProgress(0);
-      };
-      reader.readAsArrayBuffer(acceptedFiles[0]);
+      await processFiles(acceptedFiles);
     },
     accept: {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
       'application/vnd.ms-excel': ['.xls']
     },
+    multiple: true,
     noClick: true
   });
 
-  const handleGithubLoad = async (customUrl?: string) => {
-    const targetUrl = customUrl || githubUrl.trim() || getGithubRevisitaUrl();
-    if (!targetUrl) return;
+  // Synchronize both Jan_Jun and Jul_Dez files from GitHub (with fallback)
+  const handleGithubSyncBoth = async (customJanJun?: string, customJulDez?: string) => {
     setIsImporting(true);
-    setImportProgress(20);
     setIsGithubLoading(true);
+    setImportProgress(10);
     setError(null);
+    setSyncStatus(null);
 
+    const urlJanJun = customJanJun || githubJanJunUrl.trim() || getGithubRevisitaJanJunUrl();
+    const urlJulDez = customJulDez || githubJulDezUrl.trim() || getGithubRevisitaJulDezUrl();
+
+    let allRows: Revisita30DRow[] = [];
+    const loadedSummaries: string[] = [];
+    const failedNotes: string[] = [];
+
+    // 1. Fetch Jan_Jun
+    setImportProgress(25);
     try {
-      setImportProgress(50);
-      const arrayBuffer = await fetchGithubFileArrayBuffer(targetUrl);
-      setImportProgress(75);
-      const success = processExcelData(arrayBuffer);
-      if (success) {
-        setShowGithubInput(false);
+      const buffer1 = await fetchGithubFileArrayBuffer(urlJanJun);
+      const rows1 = parseExcelBuffer(buffer1, 'REVISITA_30D_Jan_Jun.xlsx');
+      if (rows1.length > 0) {
+        allRows = mergeDatasets(allRows, rows1);
+        loadedSummaries.push(`REVISITA_30D_Jan_Jun.xlsx (${formatInteger(rows1.length)} OS)`);
       }
     } catch (err: any) {
-      console.error('[Revisita30D] GitHub load error:', err);
-      setError(err.message || 'Erro ao sincronizar com GitHub.');
-      setIsImporting(false);
-      setImportProgress(0);
-    } finally {
-      setIsGithubLoading(false);
+      failedNotes.push(`REVISITA_30D_Jan_Jun.xlsx`);
     }
+
+    // 2. Fetch Jul_Dez
+    setImportProgress(60);
+    try {
+      const buffer2 = await fetchGithubFileArrayBuffer(urlJulDez);
+      const rows2 = parseExcelBuffer(buffer2, 'REVISITA_30D_Jul_Dez.xlsx');
+      if (rows2.length > 0) {
+        allRows = mergeDatasets(allRows, rows2);
+        loadedSummaries.push(`REVISITA_30D_Jul_Dez.xlsx (${formatInteger(rows2.length)} OS)`);
+      }
+    } catch (err: any) {
+      failedNotes.push(`REVISITA_30D_Jul_Dez.xlsx`);
+    }
+
+    // 3. Fallback: If neither Jan_Jun nor Jul_Dez was found on GitHub, attempt fallback to REVISITA_30D_Norte.xlsx
+    if (allRows.length === 0) {
+      setImportProgress(75);
+      try {
+        const fallbackUrl = getGithubRevisitaUrl();
+        const bufferFallback = await fetchGithubFileArrayBuffer(fallbackUrl);
+        const rowsFallback = parseExcelBuffer(bufferFallback, 'REVISITA_30D_Norte.xlsx');
+        if (rowsFallback.length > 0) {
+          allRows = rowsFallback;
+          loadedSummaries.push(`REVISITA_30D_Norte.xlsx (${formatInteger(rowsFallback.length)} OS)`);
+        }
+      } catch (fallbackErr: any) {
+        // failed both
+      }
+    }
+
+    setImportProgress(95);
+
+    if (allRows.length > 0) {
+      setData(allRows);
+      setLoadedFiles(loadedSummaries);
+      setShowGithubInput(false);
+
+      if (loadedSummaries.length >= 2) {
+        setSyncStatus({
+          type: 'success',
+          message: `Sincronização dos 2 arquivos concluída com sucesso! ${loadedSummaries.join(' + ')} — Total: ${formatInteger(allRows.length)} ordens analisadas.`
+        });
+      } else {
+        const warning = failedNotes.length > 0 ? ` (Aviso: ${failedNotes.join(', ')} não localizado no GitHub)` : '';
+        setSyncStatus({
+          type: 'success',
+          message: `Sincronização concluída: ${loadedSummaries.join(' + ')} — Total: ${formatInteger(allRows.length)} ordens.${warning}`
+        });
+      }
+    } else {
+      setError(`Não foi possível sincronizar os arquivos do GitHub (${failedNotes.join(', ')}). Verifique se os arquivos REVISITA_30D_Jan_Jun.xlsx e REVISITA_30D_Jul_Dez.xlsx foram publicados no repositório.`);
+    }
+
+    setIsLoading(false);
+    setIsGithubLoading(false);
+    setImportProgress(100);
+    setTimeout(() => {
+      setIsImporting(false);
+    }, 400);
   };
 
   const handleRestoreDefault = () => {
     setData(INITIAL_MOCK_REVISITA);
+    setLoadedFiles(['Base de Exemplo (7.941 OS)']);
+    setSyncStatus(null);
     setFilters({
+      mes: [],
       municipio: [],
       tipoOs: [],
       empresa: [],
@@ -609,7 +796,10 @@ export default function Revisita30DDashboard() {
 
   const handleClearData = () => {
     setData([]);
+    setLoadedFiles([]);
+    setSyncStatus(null);
     setFilters({
+      mes: [],
       municipio: [],
       tipoOs: [],
       empresa: [],
@@ -633,7 +823,8 @@ export default function Revisita30DDashboard() {
       'CÓDIGO DE BAIXA': r.codigoBaixa,
       'QTD REVISITAS': r.qtdRevisitas,
       'PADRÃO': r.qtdRevisitas === 0 ? '0 - COM PADRÃO' : '1 - SEM PADRÃO (REVISITA)',
-      'DATA BAIXA': r.dataBaixa
+      'DATA BAIXA': r.dataBaixa,
+      'MÊS': r.mes || ''
     }));
 
     const ws = XLSX.utils.json_to_sheet(exportRows);
@@ -684,8 +875,29 @@ export default function Revisita30DDashboard() {
 
   // Distinct filter options (cascading based on other active filters)
   const filterOptions = useMemo(() => {
+    // 0. Months available considering other active filters
+    const dataForMeses = data.filter(row => {
+      if (filters.municipio.length > 0 && !filters.municipio.some(m => m.trim().toLowerCase() === (row.municipio || '').trim().toLowerCase())) return false;
+      if (filters.tipoOs.length > 0 && !filters.tipoOs.some(t => t.trim().toLowerCase() === (row.tipoOs || '').trim().toLowerCase())) return false;
+      if (filters.empresa.length > 0 && !filters.empresa.some(e => e.trim().toLowerCase() === (row.empresa || '').trim().toLowerCase())) return false;
+      if (filters.unidadeNegocio.length > 0 && !filters.unidadeNegocio.some(u => u.trim().toLowerCase() === (row.unidadeNegocio || '').trim().toLowerCase())) return false;
+      if (filters.padraoOs.length > 0 && !filters.padraoOs.includes(String(row.qtdRevisitas))) return false;
+      if (!matchesDateRange(row.dataBaixa)) return false;
+      return true;
+    });
+    const rawMeses = Array.from(new Set(dataForMeses.map(d => d.mes))).filter(Boolean);
+    const meses = rawMeses.sort((a, b) => {
+      const idxA = MONTH_ORDER.indexOf(a);
+      const idxB = MONTH_ORDER.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b, 'pt-BR');
+    });
+
     // 1. Municipios available considering other active filters
     const dataForMunicipios = data.filter(row => {
+      if (filters.mes.length > 0 && !filters.mes.includes(row.mes)) return false;
       if (filters.tipoOs.length > 0 && !filters.tipoOs.some(t => t.trim().toLowerCase() === (row.tipoOs || '').trim().toLowerCase())) return false;
       if (filters.empresa.length > 0 && !filters.empresa.some(e => e.trim().toLowerCase() === (row.empresa || '').trim().toLowerCase())) return false;
       if (filters.unidadeNegocio.length > 0 && !filters.unidadeNegocio.some(u => u.trim().toLowerCase() === (row.unidadeNegocio || '').trim().toLowerCase())) return false;
@@ -697,6 +909,7 @@ export default function Revisita30DDashboard() {
 
     // 2. Tipos OS available considering other active filters
     const dataForTipos = data.filter(row => {
+      if (filters.mes.length > 0 && !filters.mes.includes(row.mes)) return false;
       if (filters.municipio.length > 0 && !filters.municipio.some(m => m.trim().toLowerCase() === (row.municipio || '').trim().toLowerCase())) return false;
       if (filters.empresa.length > 0 && !filters.empresa.some(e => e.trim().toLowerCase() === (row.empresa || '').trim().toLowerCase())) return false;
       if (filters.unidadeNegocio.length > 0 && !filters.unidadeNegocio.some(u => u.trim().toLowerCase() === (row.unidadeNegocio || '').trim().toLowerCase())) return false;
@@ -708,6 +921,7 @@ export default function Revisita30DDashboard() {
 
     // 3. Empresas available considering other active filters
     const dataForEmpresas = data.filter(row => {
+      if (filters.mes.length > 0 && !filters.mes.includes(row.mes)) return false;
       if (filters.municipio.length > 0 && !filters.municipio.some(m => m.trim().toLowerCase() === (row.municipio || '').trim().toLowerCase())) return false;
       if (filters.tipoOs.length > 0 && !filters.tipoOs.some(t => t.trim().toLowerCase() === (row.tipoOs || '').trim().toLowerCase())) return false;
       if (filters.unidadeNegocio.length > 0 && !filters.unidadeNegocio.some(u => u.trim().toLowerCase() === (row.unidadeNegocio || '').trim().toLowerCase())) return false;
@@ -719,6 +933,7 @@ export default function Revisita30DDashboard() {
 
     // 4. Unidades available considering other active filters
     const dataForUnidades = data.filter(row => {
+      if (filters.mes.length > 0 && !filters.mes.includes(row.mes)) return false;
       if (filters.municipio.length > 0 && !filters.municipio.some(m => m.trim().toLowerCase() === (row.municipio || '').trim().toLowerCase())) return false;
       if (filters.tipoOs.length > 0 && !filters.tipoOs.some(t => t.trim().toLowerCase() === (row.tipoOs || '').trim().toLowerCase())) return false;
       if (filters.empresa.length > 0 && !filters.empresa.some(e => e.trim().toLowerCase() === (row.empresa || '').trim().toLowerCase())) return false;
@@ -730,12 +945,24 @@ export default function Revisita30DDashboard() {
 
     const padroes = ['0', '1'];
 
-    return { municipios, tiposOs, empresas, unidades, padroes };
+    return { meses, municipios, tiposOs, empresas, unidades, padroes };
   }, [data, filters]);
+
+  // Toggle or select month filter from chart clicks
+  const handleMonthClick = (mesName: string) => {
+    setFilters(prev => {
+      const exists = prev.mes.includes(mesName);
+      return {
+        ...prev,
+        mes: exists ? prev.mes.filter(m => m !== mesName) : [...prev.mes, mesName]
+      };
+    });
+  };
 
   // Filtered dataset
   const filteredData = useMemo(() => {
     return data.filter(row => {
+      if (filters.mes.length > 0 && !filters.mes.includes(row.mes)) return false;
       if (filters.municipio.length > 0 && !filters.municipio.some(m => m.trim().toLowerCase() === (row.municipio || '').trim().toLowerCase())) return false;
       if (filters.tipoOs.length > 0 && !filters.tipoOs.some(t => t.trim().toLowerCase() === (row.tipoOs || '').trim().toLowerCase())) return false;
       if (filters.empresa.length > 0 && !filters.empresa.some(e => e.trim().toLowerCase() === (row.empresa || '').trim().toLowerCase())) return false;
@@ -847,6 +1074,96 @@ export default function Revisita30DDashboard() {
       };
     });
   }, [filteredData]);
+
+  // 3.0. EVOLUÇÃO MENSAL DA NOTA REVISITA (Janeiro a Dezembro)
+  const chartEvolucaoMensal = useMemo(() => {
+    const monthMap: Record<string, { total: number; semPadrao: number; comPadrao: number }> = {};
+
+    // Source data respects active filters except mes to present full annual context
+    const sourceData = data.filter(row => {
+      if (filters.municipio.length > 0 && !filters.municipio.some(m => m.trim().toLowerCase() === (row.municipio || '').trim().toLowerCase())) return false;
+      if (filters.tipoOs.length > 0 && !filters.tipoOs.some(t => t.trim().toLowerCase() === (row.tipoOs || '').trim().toLowerCase())) return false;
+      if (filters.empresa.length > 0 && !filters.empresa.some(e => e.trim().toLowerCase() === (row.empresa || '').trim().toLowerCase())) return false;
+      if (filters.unidadeNegocio.length > 0 && !filters.unidadeNegocio.some(u => u.trim().toLowerCase() === (row.unidadeNegocio || '').trim().toLowerCase())) return false;
+      if (filters.padraoOs.length > 0 && !filters.padraoOs.includes(String(row.qtdRevisitas))) return false;
+      if (!matchesDateRange(row.dataBaixa)) return false;
+      return true;
+    });
+
+    sourceData.forEach(row => {
+      const m = row.mes || 'NÃO INFORMADO';
+      if (!monthMap[m]) {
+        monthMap[m] = { total: 0, semPadrao: 0, comPadrao: 0 };
+      }
+      monthMap[m].total++;
+      if (row.qtdRevisitas === 1) {
+        monthMap[m].semPadrao++;
+      } else {
+        monthMap[m].comPadrao++;
+      }
+    });
+
+    const MONTH_SHORT: Record<string, string> = {
+      'Janeiro': 'Jan',
+      'Fevereiro': 'Fev',
+      'Março': 'Mar',
+      'Abril': 'Abr',
+      'Maio': 'Mai',
+      'Junho': 'Jun',
+      'Julho': 'Jul',
+      'Agosto': 'Ago',
+      'Setembro': 'Set',
+      'Outubro': 'Out',
+      'Novembro': 'Nov',
+      'Dezembro': 'Dez'
+    };
+
+    const sortedMonthKeys = Object.keys(monthMap).sort((a, b) => {
+      const idxA = MONTH_ORDER.indexOf(a);
+      const idxB = MONTH_ORDER.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b, 'pt-BR');
+    });
+
+    return sortedMonthKeys.map(mesKey => {
+      const val = monthMap[mesKey];
+      const nota = val.total > 0 ? (val.semPadrao / val.total) * 100 : 0;
+      const isSelected = filters.mes.length === 0 || filters.mes.includes(mesKey);
+      return {
+        mes: mesKey,
+        mesCurto: MONTH_SHORT[mesKey] || mesKey.slice(0, 3),
+        volume: val.total,
+        semPadrao: val.semPadrao,
+        comPadrao: val.comPadrao,
+        nota: Number(nota.toFixed(2)),
+        isSelected
+      };
+    });
+  }, [data, filters]);
+
+  const mensalStats = useMemo(() => {
+    const withData = chartEvolucaoMensal.filter(m => m.volume > 0);
+    if (withData.length === 0) {
+      return { melhorMes: null, piorMes: null, mediaNota: 0, totalVolume: 0 };
+    }
+
+    const sortedByNota = [...withData].sort((a, b) => a.nota - b.nota);
+    const melhorMes = sortedByNota[0]; // menor nota = melhor qualidade
+    const piorMes = sortedByNota[sortedByNota.length - 1]; // maior nota = pior
+
+    const totalVolume = withData.reduce((acc, m) => acc + m.volume, 0);
+    const totalSemPadrao = withData.reduce((acc, m) => acc + m.semPadrao, 0);
+    const mediaNota = totalVolume > 0 ? (totalSemPadrao / totalVolume) * 100 : 0;
+
+    return {
+      melhorMes,
+      piorMes,
+      mediaNota,
+      totalVolume
+    };
+  }, [chartEvolucaoMensal]);
 
   // 3.1. EVOLUÇÃO SEMANAL DA NOTA REVISITA (S1, S2, S3, S4, S5) - Igual ao AT1
   const chartEvolucaoSemanal = useMemo(() => {
@@ -1055,6 +1372,7 @@ export default function Revisita30DDashboard() {
         r.loginTecnico.toLowerCase().includes(q) ||
         r.codigoBaixa.toLowerCase().includes(q) ||
         r.tipoOs.toLowerCase().includes(q) ||
+        (r.mes && r.mes.toLowerCase().includes(q)) ||
         r.dataBaixa.toLowerCase().includes(q)
       );
     }
@@ -1079,6 +1397,7 @@ export default function Revisita30DDashboard() {
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
+    if (filters.mes.length > 0) count++;
     if (filters.municipio.length > 0) count++;
     if (filters.tipoOs.length > 0) count++;
     if (filters.empresa.length > 0) count++;
@@ -1158,26 +1477,39 @@ export default function Revisita30DDashboard() {
               ref={fileInputRef} 
               onChange={handleFileUpload} 
               accept=".xlsx, .xls" 
+              multiple
               className="hidden" 
             />
 
-            {/* Sincronizar GitHub */}
+            {/* Sincronizar GitHub (Jan-Jun + Jul-Dez) */}
             <button
-              onClick={() => handleGithubLoad(getGithubRevisitaUrl())}
-              className="flex items-center gap-2 bg-[#EE1D23] hover:bg-red-600 text-white font-black py-2.5 px-4 rounded-xl transition-all shadow-md shadow-red-500/15 active:scale-95 uppercase italic text-xs cursor-pointer"
-              title="Sincronizar planilha REVISITA 30D com o repositório GitHub"
+              onClick={() => handleGithubSyncBoth()}
+              disabled={isGithubLoading}
+              className="flex items-center gap-2 bg-[#EE1D23] hover:bg-red-600 disabled:opacity-60 text-white font-black py-2.5 px-4 rounded-xl transition-all shadow-md shadow-red-500/15 active:scale-95 uppercase italic text-xs cursor-pointer"
+              title="Sincronizar REVISITA_30D_Jan_Jun e REVISITA_30D_Jul_Dez do GitHub"
             >
-              <Activity className="w-3.5 h-3.5" />
-              <span>Sincronizar GitHub</span>
+              {isGithubLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+              <span>Sincronizar GitHub (2 Arquivos)</span>
             </button>
 
-            {/* Importar Excel */}
+            {/* Custom GitHub link toggle */}
+            <button
+              onClick={() => setShowGithubInput(!showGithubInput)}
+              className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-3 rounded-xl transition-all text-xs cursor-pointer"
+              title="Informar link personalizado do GitHub"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
+              <span className="hidden sm:inline">Link GitHub</span>
+            </button>
+
+            {/* Importar Excel (Permite selecionar 2 arquivos) */}
             <button
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-800 font-black py-2.5 px-4 rounded-xl border border-slate-200 transition-all shadow-2xs active:scale-95 uppercase italic text-xs cursor-pointer"
+              title="Importar 1 ou 2 arquivos Excel do computador"
             >
               <Upload className="w-3.5 h-3.5 text-[#EE1D23]" />
-              <span>Importar Excel</span>
+              <span>Importar Excel (1 ou 2)</span>
             </button>
 
             {/* Exportar */}
@@ -1214,6 +1546,49 @@ export default function Revisita30DDashboard() {
           </div>
         </div>
 
+        {/* Loaded Files Badges */}
+        {loadedFiles.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Arquivos Carregados:</span>
+            {loadedFiles.map((f, i) => (
+              <span key={i} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold">
+                <FileSpreadsheet className="w-3.5 h-3.5 text-[#EE1D23]" />
+                {f}
+              </span>
+            ))}
+            {loadedFiles.length > 1 && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-black">
+                <Check className="w-3.5 h-3.5" />
+                Bases Mescladas
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Sync Status Banner */}
+        {syncStatus && (
+          <div className={cn(
+            "mt-4 p-3 rounded-2xl border flex items-center justify-between gap-2 text-xs font-bold transition-all",
+            syncStatus.type === 'success' 
+              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+              : syncStatus.type === 'warning'
+              ? "bg-amber-50 border-amber-200 text-amber-800"
+              : "bg-red-50 border-red-200 text-red-800"
+          )}>
+            <div className="flex items-center gap-2">
+              {syncStatus.type === 'success' ? <Check className="w-4 h-4 text-emerald-600 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+              <span>{syncStatus.message}</span>
+            </div>
+            <button 
+              onClick={() => setSyncStatus(null)} 
+              className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer transition-colors"
+              title="Fechar aviso"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* GitHub Drawer */}
         <AnimatePresence>
           {showGithubInput && (
@@ -1223,25 +1598,54 @@ export default function Revisita30DDashboard() {
               exit={{ height: 0, opacity: 0 }}
               className="mt-6 pt-6 border-t border-slate-100 overflow-hidden"
             >
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col md:flex-row gap-3">
-                <div className="flex-1 relative">
-                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Cole o link do arquivo Excel de Revisita no GitHub (ex: https://github.com/usuario/repo/blob/main/revisita30d.xlsx)"
-                    value={githubUrl}
-                    onChange={(e) => setGithubUrl(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#EE1D23] transition-all"
-                  />
+              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                      Sincronização dos 2 Arquivos GitHub
+                    </h4>
+                    <p className="text-[11px] text-slate-500 font-medium">
+                      URLs diretas das bases semestrais REVISITA_30D_Jan_Jun.xlsx e REVISITA_30D_Jul_Dez.xlsx
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleGithubSyncBoth(githubJanJunUrl, githubJulDezUrl)}
+                    disabled={isGithubLoading}
+                    className="bg-[#EE1D23] hover:bg-red-600 disabled:opacity-50 text-white font-black py-2 px-4 rounded-xl text-xs uppercase italic flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-all active:scale-95"
+                  >
+                    {isGithubLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                    Sincronizar Ambos os Arquivos
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleGithubLoad()}
-                  disabled={!githubUrl.trim() || isGithubLoading}
-                  className="bg-[#EE1D23] hover:bg-red-600 disabled:bg-slate-300 text-white font-black py-2.5 px-6 rounded-xl transition-all shadow-md shadow-red-500/20 active:scale-95 uppercase italic text-xs flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  {isGithubLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                  Sincronizar Arquivo
-                </button>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                      <FileSpreadsheet className="w-3 h-3 text-[#EE1D23]" />
+                      Arquivo Jan a Jun (REVISITA_30D_Jan_Jun.xlsx)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={getGithubRevisitaJanJunUrl()}
+                      value={githubJanJunUrl}
+                      onChange={(e) => setGithubJanJunUrl(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#EE1D23] transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                      <FileSpreadsheet className="w-3 h-3 text-[#EE1D23]" />
+                      Arquivo Jul a Dez (REVISITA_30D_Jul_Dez.xlsx)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={getGithubRevisitaJulDezUrl()}
+                      value={githubJulDezUrl}
+                      onChange={(e) => setGithubJulDezUrl(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-[#EE1D23] transition-all"
+                    />
+                  </div>
+                </div>
               </div>
             </motion.div>
           )}
@@ -1260,7 +1664,7 @@ export default function Revisita30DDashboard() {
       {isDragActive && (
         <div className="p-8 border-2 border-dashed border-[#EE1D23] bg-red-50/70 rounded-3xl text-center">
           <Upload className="w-10 h-10 text-[#EE1D23] mx-auto mb-2 animate-bounce" />
-          <p className="text-sm font-black text-slate-900 uppercase italic">Solte o arquivo Excel (.xlsx, .xls) aqui para carregar</p>
+          <p className="text-sm font-black text-slate-900 uppercase italic">Solte o(s) arquivo(s) Excel (.xlsx, .xls) aqui para carregar</p>
         </div>
       )}
 
@@ -1273,22 +1677,22 @@ export default function Revisita30DDashboard() {
             Nenhum Dado de Revisita 30D Carregado
           </h3>
           <p className="text-xs text-slate-400 max-w-md mb-6 leading-relaxed font-bold uppercase tracking-wider">
-            Sincronize com o GitHub ou importe a planilha Excel (REVISITA_30D.xlsx) para visualizar os indicadores de repetição e retrabalho.
+            Sincronize os arquivos REVISITA_30D_Jan_Jun e REVISITA_30D_Jul_Dez com o GitHub ou importe os arquivos Excel para visualizar os indicadores de repetição e retrabalho.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <button
-              onClick={() => handleGithubLoad(getGithubRevisitaUrl())}
+              onClick={() => handleGithubSyncBoth()}
               className="flex items-center gap-2 bg-[#EE1D23] hover:bg-red-600 text-white font-black py-2.5 px-5 rounded-xl transition-all shadow-md shadow-red-500/15 active:scale-95 uppercase italic text-xs cursor-pointer"
             >
               <Activity className="w-3.5 h-3.5" />
-              <span>Sincronizar GitHub</span>
+              <span>Sincronizar GitHub (2 Arquivos)</span>
             </button>
             <button
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-800 font-black py-2.5 px-5 rounded-xl border border-slate-200 transition-all shadow-2xs active:scale-95 uppercase italic text-xs cursor-pointer"
             >
               <Upload className="w-3.5 h-3.5 text-[#EE1D23]" />
-              <span>Importar Excel</span>
+              <span>Importar Excel (1 ou 2)</span>
             </button>
           </div>
         </div>
@@ -1309,6 +1713,7 @@ export default function Revisita30DDashboard() {
           {activeFiltersCount > 0 && (
             <button
               onClick={() => setFilters({
+                mes: [],
                 municipio: [],
                 tipoOs: [],
                 empresa: [],
@@ -1325,7 +1730,17 @@ export default function Revisita30DDashboard() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3.5 items-end">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 items-end">
+          {/* MÊS */}
+          <MultiFilterSelect
+            label="MÊS"
+            icon={<Calendar className="w-3.5 h-3.5" />}
+            value={filters.mes}
+            options={filterOptions.meses}
+            onChange={(val) => setFilters(prev => ({ ...prev, mes: val }))}
+            placeholder="Todos os Meses"
+          />
+
           {/* MUNICÍPIO */}
           <MultiFilterSelect
             label="MUNICÍPIO"
@@ -1577,6 +1992,379 @@ export default function Revisita30DDashboard() {
 
       {/* Gráficos Principais */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* 0. EVOLUÇÃO MENSAL DA NOTA REVISITA (DESTAQUE FULL-WIDTH) */}
+        <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-5 lg:col-span-2">
+          {/* Header do Gráfico Mensal */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-[#EE1D23] flex items-center justify-center shrink-0 shadow-xs">
+                <Calendar className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm font-black uppercase tracking-wide text-slate-900">
+                    EVOLUÇÃO MENSAL DA NOTA REVISITA
+                  </h3>
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-red-100 text-[#EE1D23] px-2 py-0.5 rounded-md">
+                    Histórico Anual
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  Acompanhamento consolidado da taxa de revisita e volume de OS mês a mês
+                </p>
+              </div>
+            </div>
+
+            {/* Badges Rápidos e Controles */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Resumos Estatísticos */}
+              {mensalStats.melhorMes && (
+                <div 
+                  title="Melhor desempenho em qualidade: menor taxa de revisita no ano"
+                  className="hidden sm:flex items-center gap-1.5 bg-emerald-50 border border-emerald-200/80 px-2.5 py-1 rounded-xl text-xs"
+                >
+                  <span className="text-[10px] font-black uppercase text-emerald-700">Melhor Mês:</span>
+                  <span className="font-black text-emerald-800">{mensalStats.melhorMes.mesCurto}</span>
+                  <span className="font-extrabold text-emerald-600 bg-emerald-100/80 px-1.5 py-0.5 rounded text-[10px]">
+                    {formatPercent(mensalStats.melhorMes.nota)}
+                  </span>
+                </div>
+              )}
+
+              {mensalStats.piorMes && (
+                <div 
+                  title="Maior taxa de retrabalho no ano"
+                  className="hidden sm:flex items-center gap-1.5 bg-red-50 border border-red-200/80 px-2.5 py-1 rounded-xl text-xs"
+                >
+                  <span className="text-[10px] font-black uppercase text-red-700">Pior Mês:</span>
+                  <span className="font-black text-red-800">{mensalStats.piorMes.mesCurto}</span>
+                  <span className="font-extrabold text-red-600 bg-red-100/80 px-1.5 py-0.5 rounded text-[10px]">
+                    {formatPercent(mensalStats.piorMes.nota)}
+                  </span>
+                </div>
+              )}
+
+              {/* Botão limpar filtro de mês se houver seleção */}
+              {filters.mes.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFilters(prev => ({ ...prev, mes: [] }))}
+                  className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-xl text-[11px] font-black flex items-center gap-1 transition-all cursor-pointer"
+                  title="Limpar filtro de mês aplicado"
+                >
+                  <X className="w-3 h-3" />
+                  Limpar Mês ({filters.mes.length})
+                </button>
+              )}
+
+              {/* Seletor de Tipo de Gráfico */}
+              <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setMensalViewMode('bar')}
+                  className={cn(
+                    "px-2.5 py-1 text-[11px] font-black rounded-lg transition-all cursor-pointer flex items-center gap-1",
+                    mensalViewMode === 'bar' ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                  )}
+                  title="Gráfico de Colunas por Faixa de Meta"
+                >
+                  <BarChart2 className="w-3 h-3" />
+                  Barras (% Nota)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMensalViewMode('composed')}
+                  className={cn(
+                    "px-2.5 py-1 text-[11px] font-black rounded-lg transition-all cursor-pointer flex items-center gap-1",
+                    mensalViewMode === 'composed' ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                  )}
+                  title="Visão Composta (Volume Total em Colunas + Linha de Nota %)"
+                >
+                  <Layers className="w-3 h-3" />
+                  Volume & Nota
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMensalViewMode('line')}
+                  className={cn(
+                    "px-2.5 py-1 text-[11px] font-black rounded-lg transition-all cursor-pointer flex items-center gap-1",
+                    mensalViewMode === 'line' ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                  )}
+                  title="Curva Contínua de Tendência da Nota"
+                >
+                  <TrendingUp className="w-3 h-3" />
+                  Tendência
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Gráfico */}
+          <div className="h-92 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              {mensalViewMode === 'bar' ? (
+                <BarChart 
+                  data={chartEvolucaoMensal} 
+                  margin={{ top: 25, right: 20, left: -10, bottom: 25 }}
+                  barCategoryGap="18%"
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                  <XAxis 
+                    dataKey="mesCurto" 
+                    tickLine={false}
+                    axisLine={{ stroke: '#CBD5E1' }}
+                    tick={{ fill: '#334155', fontSize: 11, fontWeight: 800 }}
+                  />
+                  <YAxis 
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fill: '#64748B', fontSize: 10, fontWeight: 700 }}
+                    tickFormatter={(val) => `${val}%`}
+                    domain={[0, 'auto']}
+                  />
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const d = payload[0].payload;
+                        const statusColor = d.nota <= 10 ? 'text-emerald-400' : d.nota <= 15 ? 'text-amber-400' : 'text-red-400';
+                        const statusText = d.nota <= 10 ? 'Meta Atingida (<= 10%)' : d.nota <= 15 ? 'Atenção (<= 15%)' : 'Crítico (> 15%)';
+                        return (
+                          <div className="bg-slate-900 text-white p-3.5 rounded-2xl shadow-2xl text-xs space-y-2 border border-slate-700 min-w-56">
+                            <div className="flex items-center justify-between border-b border-slate-700 pb-1.5">
+                              <p className="font-black text-amber-300 text-sm">{d.mes}</p>
+                              <span className={`text-[10px] font-black uppercase ${statusColor}`}>{statusText}</span>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="flex justify-between gap-4">
+                                <span className="text-slate-300 font-medium">Nota de Revisita:</span>
+                                <span className="font-black text-white text-sm">{formatPercent(d.nota)}</span>
+                              </p>
+                              <p className="flex justify-between gap-4">
+                                <span className="text-red-300 font-medium">Sem Padrão (Revisita):</span>
+                                <span className="font-bold text-red-400">{formatInteger(d.semPadrao)} OS</span>
+                              </p>
+                              <p className="flex justify-between gap-4">
+                                <span className="text-emerald-300 font-medium">Com Padrão (Sem Revisita):</span>
+                                <span className="font-bold text-emerald-400">{formatInteger(d.comPadrao)} OS</span>
+                              </p>
+                              <p className="flex justify-between gap-4 border-t border-slate-800 pt-1">
+                                <span className="text-slate-400 font-medium">Volume Total no Mês:</span>
+                                <span className="font-black text-slate-100">{formatInteger(d.volume)} OS</span>
+                              </p>
+                            </div>
+                            <p className="text-[10px] text-slate-400 italic text-center pt-1 border-t border-slate-800">
+                              Clique para alternar o filtro deste mês
+                            </p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Bar 
+                    dataKey="nota" 
+                    radius={[8, 8, 0, 0]}
+                    maxBarSize={54}
+                    cursor="pointer"
+                    onClick={(entry: any) => entry && entry.mes && handleMonthClick(entry.mes)}
+                  >
+                    <LabelList 
+                      dataKey="nota" 
+                      position="top" 
+                      formatter={(val: number) => `${val.toFixed(1)}%`}
+                      style={{ fill: '#0F172A', fontSize: 11, fontWeight: 900 }} 
+                    />
+                    {chartEvolucaoMensal.map((entry, index) => {
+                      const isFiltered = filters.mes.length > 0 && !filters.mes.includes(entry.mes);
+                      const baseColor = entry.nota <= 10 ? '#10B981' : entry.nota <= 15 ? '#F59E0B' : '#EE1D23';
+                      return (
+                        <Cell 
+                          key={`month-bar-${index}`} 
+                          fill={baseColor}
+                          opacity={isFiltered ? 0.3 : 1}
+                          stroke={filters.mes.includes(entry.mes) ? '#0F172A' : 'transparent'}
+                          strokeWidth={filters.mes.includes(entry.mes) ? 2 : 0}
+                        />
+                      );
+                    })}
+                  </Bar>
+                </BarChart>
+              ) : mensalViewMode === 'composed' ? (
+                <ComposedChart 
+                  data={chartEvolucaoMensal}
+                  margin={{ top: 25, right: 30, left: 0, bottom: 25 }}
+                  barCategoryGap="18%"
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                  <XAxis 
+                    dataKey="mesCurto" 
+                    tickLine={false}
+                    axisLine={{ stroke: '#CBD5E1' }}
+                    tick={{ fill: '#334155', fontSize: 11, fontWeight: 800 }}
+                  />
+                  <YAxis 
+                    yAxisId="left"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fill: '#64748B', fontSize: 10, fontWeight: 700 }}
+                    tickFormatter={(val) => val >= 1000 ? `${(val/1000).toFixed(0)}k` : `${val}`}
+                  />
+                  <YAxis 
+                    yAxisId="right"
+                    orientation="right"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fill: '#EE1D23', fontSize: 10, fontWeight: 800 }}
+                    tickFormatter={(val) => `${val}%`}
+                    domain={[0, 'auto']}
+                  />
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const d = payload[0].payload;
+                        return (
+                          <div className="bg-slate-900 text-white p-3.5 rounded-2xl shadow-2xl text-xs space-y-1.5 border border-slate-700 min-w-52">
+                            <p className="font-black text-amber-300 text-sm border-b border-slate-700 pb-1">{d.mes}</p>
+                            <p className="flex justify-between gap-4">
+                              <span className="text-[#EE1D23] font-bold">Nota de Revisita:</span>
+                              <span className="font-black text-white">{formatPercent(d.nota)}</span>
+                            </p>
+                            <p className="flex justify-between gap-4">
+                              <span className="text-slate-300 font-medium">Volume Total:</span>
+                              <span className="font-bold text-slate-100">{formatInteger(d.volume)} OS</span>
+                            </p>
+                            <p className="flex justify-between gap-4">
+                              <span className="text-red-300 font-medium">Sem Padrão (1):</span>
+                              <span className="font-bold text-red-400">{formatInteger(d.semPadrao)} OS</span>
+                            </p>
+                            <p className="flex justify-between gap-4">
+                              <span className="text-emerald-300 font-medium">Com Padrão (0):</span>
+                              <span className="font-bold text-emerald-400">{formatInteger(d.comPadrao)} OS</span>
+                            </p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Legend 
+                    verticalAlign="top" 
+                    height={36} 
+                    iconType="circle"
+                    formatter={(val) => <span className="text-xs font-bold text-slate-700">{val}</span>}
+                  />
+                  <Bar 
+                    yAxisId="left" 
+                    dataKey="volume" 
+                    name="Volume de OS" 
+                    fill="#94A3B8" 
+                    radius={[6, 6, 0, 0]}
+                    maxBarSize={44}
+                    opacity={0.7}
+                    cursor="pointer"
+                    onClick={(entry: any) => entry && entry.mes && handleMonthClick(entry.mes)}
+                  />
+                  <Line 
+                    yAxisId="right" 
+                    type="monotone" 
+                    dataKey="nota" 
+                    name="Nota Revisita (%)" 
+                    stroke="#EE1D23" 
+                    strokeWidth={3.5}
+                    dot={{ r: 5, fill: '#EE1D23', stroke: '#FFFFFF', strokeWidth: 2 }}
+                    activeDot={{ r: 7, fill: '#EE1D23', stroke: '#FFFFFF', strokeWidth: 2 }}
+                  >
+                    <LabelList 
+                      dataKey="nota" 
+                      position="top" 
+                      formatter={(val: number) => `${val.toFixed(1)}%`}
+                      style={{ fill: '#EE1D23', fontSize: 10, fontWeight: 900 }} 
+                    />
+                  </Line>
+                </ComposedChart>
+              ) : (
+                <LineChart 
+                  data={chartEvolucaoMensal} 
+                  margin={{ top: 25, right: 30, left: -10, bottom: 25 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                  <XAxis 
+                    dataKey="mesCurto" 
+                    tickLine={false}
+                    axisLine={{ stroke: '#CBD5E1' }}
+                    tick={{ fill: '#334155', fontSize: 11, fontWeight: 800 }}
+                  />
+                  <YAxis 
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fill: '#64748B', fontSize: 10, fontWeight: 700 }}
+                    tickFormatter={(val) => `${val}%`}
+                    domain={[0, 'auto']}
+                  />
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const d = payload[0].payload;
+                        return (
+                          <div className="bg-slate-900 text-white p-3.5 rounded-2xl shadow-2xl text-xs space-y-1.5 border border-slate-700 min-w-52">
+                            <p className="font-black text-amber-300 text-sm border-b border-slate-700 pb-1">{d.mes}</p>
+                            <p className="flex justify-between gap-4">
+                              <span className="text-slate-300 font-medium">Nota de Revisita:</span>
+                              <span className="font-black text-white">{formatPercent(d.nota)}</span>
+                            </p>
+                            <p className="flex justify-between gap-4">
+                              <span className="text-slate-400 font-medium">Volume no Mês:</span>
+                              <span className="font-bold text-slate-100">{formatInteger(d.volume)} OS</span>
+                            </p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="nota" 
+                    stroke="#EE1D23" 
+                    strokeWidth={4} 
+                    dot={{ r: 5, fill: '#EE1D23', stroke: '#FFFFFF', strokeWidth: 2 }}
+                    activeDot={{ r: 8, fill: '#EE1D23', stroke: '#FFFFFF', strokeWidth: 2 }}
+                  >
+                    <LabelList 
+                      dataKey="nota" 
+                      position="top" 
+                      formatter={(val: number) => `${val.toFixed(1)}%`} 
+                      style={{ fill: '#1E293B', fontSize: 11, fontWeight: 900 }} 
+                    />
+                  </Line>
+                </LineChart>
+              )}
+            </ResponsiveContainer>
+          </div>
+
+          {/* Legenda de Metas e Dica */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
+            <div className="flex items-center gap-4 flex-wrap">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Faixas de Meta:</span>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#10B981]" />
+                <span className="font-bold text-slate-600 text-[11px]">≤ 10% (Excelente)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]" />
+                <span className="font-bold text-slate-600 text-[11px]">10.1% a 15% (Atenção)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#EE1D23]" />
+                <span className="font-bold text-slate-600 text-[11px]">&gt; 15% (Crítico)</span>
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-400 font-medium italic">
+              Dica: Clique em qualquer mês para alternar o filtro no painel.
+            </p>
+          </div>
+        </div>
+
         {/* 1. REVISITA POR MUNICÍPIO */}
         <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
           <div className="flex items-center justify-between">
@@ -2465,6 +3253,7 @@ export default function Revisita30DDashboard() {
                 <th className="py-3 px-4 border-b border-slate-800">Técnico</th>
                 <th className="py-3 px-4 border-b border-slate-800">Tipo OS</th>
                 <th className="py-3 px-4 border-b border-slate-800">Código de Baixa</th>
+                <th className="py-3 px-4 border-b border-slate-800 text-center">Mês</th>
                 <th className="py-3 px-4 border-b border-slate-800 text-center">Data</th>
                 <th className="py-3 px-4 border-b border-slate-800 text-center">Padrão OS</th>
               </tr>
@@ -2493,6 +3282,9 @@ export default function Revisita30DDashboard() {
                   <td className="py-2.5 px-4 text-slate-500 max-w-xs truncate" title={row.codigoBaixa}>
                     {row.codigoBaixa}
                   </td>
+                  <td className="py-2.5 px-4 text-center font-bold text-slate-700">
+                    {row.mes || '-'}
+                  </td>
                   <td className="py-2.5 px-4 text-center font-mono text-slate-500">
                     {row.dataBaixa}
                   </td>
@@ -2513,7 +3305,7 @@ export default function Revisita30DDashboard() {
               ))}
               {paginatedData.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="py-8 text-center text-slate-400 font-bold text-xs">
+                  <td colSpan={10} className="py-8 text-center text-slate-400 font-bold text-xs">
                     Nenhum registro encontrado para os filtros e busca aplicados.
                   </td>
                 </tr>
