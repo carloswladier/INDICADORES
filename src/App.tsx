@@ -37,7 +37,10 @@ import {
   PanelLeftClose,
   PanelLeft,
   UserMinus,
-  Network
+  Network,
+  Layers,
+  MousePointerClick,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -67,6 +70,8 @@ import OutageDashboard, { OutageEvent } from './components/OutageDashboard';
 import Revisita30DDashboard from './components/Revisita30DDashboard';
 import ChurnDashboard from './components/ChurnDashboard';
 import QoeGponDashboard from './components/QoeGponDashboard';
+import { QoeGponRow, generateSampleQoeGponData } from './data/qoeGponData';
+import { At1AnaliticoTable } from './components/At1AnaliticoTable';
 
 // Diário de Bordo Types
 interface LogEntry {
@@ -950,12 +955,15 @@ const MONTH_ORDER = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
 
 export default function App() {
   const [baseData, setBaseData] = useState<VisitData[]>([]);
+  const [at1ViewMode, setAt1ViewMode] = useState<'dashboard' | 'analitico'>('dashboard');
   const [baseCidadeData, setBaseCidadeData] = useState<BaseCidadeData[]>([]);
   const [sharedOutageData, setSharedOutageData] = useState<OutageEvent[]>([]);
   const [sharedAt5Data, setSharedAt5Data] = useState<AT5Row[]>([]);
+  const [sharedQoeData, setSharedQoeData] = useState<QoeGponRow[]>(() => generateSampleQoeGponData());
   const [importError, setImportError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
+  const cancelImportRef = useRef(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'outage' | 'qoe-gpon' | 'at5' | 'churn' | 'log' | 'revisita30d' | 'logbook'>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -1029,6 +1037,8 @@ export default function App() {
     expurgo: 'Todos',
     tecnologia: ['Todos'] as string[],
     grupoBaixa: ['Todos'] as string[],
+    tipoOs: ['Todos'] as string[],
+    terminal: ['Todos'] as string[],
     startDate: '',
     endDate: ''
   });
@@ -1063,10 +1073,14 @@ export default function App() {
           (currentFilters.expurgo === 'Sim' ? item.expurgo : !item.expurgo);
         const matchTec = key === 'tecnologia' || currentFilters.tecnologia.includes('Todos') || currentFilters.tecnologia.includes(item.tecnologia);
         const matchGrupo = key === 'grupoBaixa' || currentFilters.grupoBaixa.includes('Todos') || currentFilters.grupoBaixa.includes(item.grupoBaixa);
-        return matchMes && matchCidade && matchArea && matchExpurgo && matchTec && matchGrupo;
+        const itemTipoOs = item.tipoOs || 'NÃO INFORMADO';
+        const matchTipoOs = key === 'tipoOs' || currentFilters.tipoOs.includes('Todos') || currentFilters.tipoOs.includes(itemTipoOs);
+        const itemTerminal = item.terminal || 'NÃO INFORMADO';
+        const matchTerminal = key === 'terminal' || (currentFilters.terminal ? (currentFilters.terminal.includes('Todos') || currentFilters.terminal.includes(itemTerminal)) : true);
+        return matchMes && matchCidade && matchArea && matchExpurgo && matchTec && matchGrupo && matchTipoOs && matchTerminal;
       });
       
-      const unique = [...new Set(otherFiltersApplied.map(d => String(d[key])))];
+      const unique = [...new Set(otherFiltersApplied.map(d => String(d[key] || (key === 'tipoOs' ? 'NÃO INFORMADO' : ''))).filter(Boolean))];
       return ['Todos', ...(unique as string[]).sort((a, b) => a.localeCompare(b, 'pt-BR'))];
     };
 
@@ -1077,119 +1091,356 @@ export default function App() {
       areas: getOptions('area', filters),
       expurgos: ['Todos', 'Sim', 'Não'],
       tecnologias: getOptions('tecnologia', filters),
-      gruposBaixa: getOptions('grupoBaixa', filters)
+      gruposBaixa: getOptions('grupoBaixa', filters),
+      tiposOs: getOptions('tipoOs', filters),
+      terminais: getOptions('terminal', filters)
     };
   }, [baseData, filters]);
 
-  // Filtered Data (Base filters from dropdowns)
-  const filteredData = useMemo(() => {
-    return baseData.filter(item => {
-      const matchMes = filters.mes.includes('Todos') || filters.mes.includes(item.mes);
-      
-      let matchSemana = filters.semana.includes('Todos');
-      if (!matchSemana && item.fullDate instanceof Date && !isNaN(item.fullDate.getTime())) {
-        const day = item.fullDate.getDate();
-        let itemSemana = 'S5';
-        if (day <= 7) itemSemana = 'S1';
-        else if (day <= 14) itemSemana = 'S2';
-        else if (day <= 21) itemSemana = 'S3';
-        else if (day <= 28) itemSemana = 'S4';
-        matchSemana = filters.semana.includes(itemSemana);
-      }
+  // Core filter application function supporting selective exclusion of dimensions for cross-filtering
+  const filterVisitList = useMemo(() => {
+    return (
+      items: VisitData[],
+      flts: typeof filters,
+      nodes: string[],
+      baixas: string[],
+      exclude: {
+        mes?: boolean;
+        semana?: boolean;
+        cidade?: boolean;
+        area?: boolean;
+        expurgo?: boolean;
+        tecnologia?: boolean;
+        grupoBaixa?: boolean;
+        tipoOs?: boolean;
+        terminal?: boolean;
+        node?: boolean;
+        baixa?: boolean;
+        date?: boolean;
+      } = {}
+    ) => {
+      return items.filter(item => {
+        // Mes
+        if (!exclude.mes) {
+          if (!flts.mes.includes('Todos') && !flts.mes.includes(item.mes)) return false;
+        }
 
-      const matchCidade = filters.cidade.includes('Todos') || filters.cidade.includes(item.cidade);
-      const matchArea = filters.area.includes('Todos') || filters.area.includes(item.area);
-      const matchExpurgo = filters.expurgo === 'Todos' || 
-        (filters.expurgo === 'Sim' ? item.expurgo : !item.expurgo);
-      const matchTec = filters.tecnologia.includes('Todos') || filters.tecnologia.includes(item.tecnologia);
-      const matchGrupo = filters.grupoBaixa.includes('Todos') || filters.grupoBaixa.includes(item.grupoBaixa);
-      
-      const itemDate = new Date(item.fullDate);
-      itemDate.setHours(0, 0, 0, 0);
-      
-      let matchDate = true;
-      if (filters.startDate) {
-        const [y, m, d] = filters.startDate.split('-').map(Number);
-        const start = new Date(y, m - 1, d);
-        start.setHours(0, 0, 0, 0);
-        matchDate = matchDate && itemDate >= start;
-      }
-      if (filters.endDate) {
-        const [y, m, d] = filters.endDate.split('-').map(Number);
-        const end = new Date(y, m - 1, d);
-        end.setHours(0, 0, 0, 0);
-        matchDate = matchDate && itemDate <= end;
-      }
-      
-      return matchMes && matchSemana && matchCidade && matchArea && matchExpurgo && matchTec && matchGrupo && matchDate;
-    });
-  }, [filters, baseData]);
+        // Semana
+        if (!exclude.semana) {
+          if (!flts.semana.includes('Todos')) {
+            if (item.fullDate instanceof Date && !isNaN(item.fullDate.getTime())) {
+              const day = item.fullDate.getDate();
+              let itemSemana = 'S5';
+              if (day <= 7) itemSemana = 'S1';
+              else if (day <= 14) itemSemana = 'S2';
+              else if (day <= 21) itemSemana = 'S3';
+              else if (day <= 28) itemSemana = 'S4';
+              if (!flts.semana.includes(itemSemana)) return false;
+            } else {
+              return false;
+            }
+          }
+        }
+
+        // Cidade
+        if (!exclude.cidade) {
+          if (!flts.cidade.includes('Todos') && !flts.cidade.includes(item.cidade)) return false;
+        }
+
+        // Area
+        if (!exclude.area) {
+          if (!flts.area.includes('Todos') && !flts.area.includes(item.area)) return false;
+        }
+
+        // Expurgo
+        if (!exclude.expurgo) {
+          if (flts.expurgo !== 'Todos') {
+            const isExpurgo = flts.expurgo === 'Sim';
+            if (item.expurgo !== isExpurgo) return false;
+          }
+        }
+
+        // Tecnologia
+        if (!exclude.tecnologia) {
+          if (!flts.tecnologia.includes('Todos') && !flts.tecnologia.includes(item.tecnologia)) return false;
+        }
+
+        // Grupo de Baixa
+        if (!exclude.grupoBaixa) {
+          if (!flts.grupoBaixa.includes('Todos') && !flts.grupoBaixa.includes(item.grupoBaixa)) return false;
+        }
+
+        // Tipo de OS
+        if (!exclude.tipoOs) {
+          const itemTipoOs = item.tipoOs || 'NÃO INFORMADO';
+          if (!flts.tipoOs.includes('Todos') && !flts.tipoOs.includes(itemTipoOs)) return false;
+        }
+
+        // Terminal
+        if (!exclude.terminal) {
+          const itemTerminal = item.terminal || 'NÃO INFORMADO';
+          if (flts.terminal && !flts.terminal.includes('Todos') && !flts.terminal.includes(itemTerminal)) return false;
+        }
+
+        // Node
+        if (!exclude.node) {
+          if (nodes.length > 0 && !nodes.includes(item.node)) return false;
+        }
+
+        // Baixa
+        if (!exclude.baixa) {
+          if (baixas.length > 0 && !baixas.includes(item.cdBaixa)) return false;
+        }
+
+        // Date range
+        if (!exclude.date && (flts.startDate || flts.endDate)) {
+          const itemDate = new Date(item.fullDate);
+          itemDate.setHours(0, 0, 0, 0);
+          if (flts.startDate) {
+            const [y, m, d] = flts.startDate.split('-').map(Number);
+            const start = new Date(y, m - 1, d);
+            start.setHours(0, 0, 0, 0);
+            if (itemDate < start) return false;
+          }
+          if (flts.endDate) {
+            const [y, m, d] = flts.endDate.split('-').map(Number);
+            const end = new Date(y, m - 1, d);
+            end.setHours(0, 0, 0, 0);
+            if (itemDate > end) return false;
+          }
+        }
+
+        return true;
+      });
+    };
+  }, []);
+
+  // Filtered Data (With all filters + selectedNodes + selectedBaixas)
+  const finalFilteredData = useMemo(() => {
+    return filterVisitList(baseData, filters, selectedNodes, selectedBaixas, {});
+  }, [baseData, filters, selectedNodes, selectedBaixas, filterVisitList]);
+
+  // Alias for backward compatibility
+  const filteredData = finalFilteredData;
 
   // Comparison Data Filtered (All filters EXCEPT month)
   const momFilteredData = useMemo(() => {
-    return baseData.filter(item => {
-      let matchSemana = filters.semana.includes('Todos');
-      if (!matchSemana && item.fullDate instanceof Date && !isNaN(item.fullDate.getTime())) {
-        const day = item.fullDate.getDate();
-        let itemSemana = 'S5';
-        if (day <= 7) itemSemana = 'S1';
-        else if (day <= 14) itemSemana = 'S2';
-        else if (day <= 21) itemSemana = 'S3';
-        else if (day <= 28) itemSemana = 'S4';
-        matchSemana = filters.semana.includes(itemSemana);
-      }
+    return filterVisitList(baseData, filters, selectedNodes, selectedBaixas, { mes: true });
+  }, [baseData, filters, selectedNodes, selectedBaixas, filterVisitList]);
 
-      const matchCidade = filters.cidade.includes('Todos') || filters.cidade.includes(item.cidade);
-      const matchArea = filters.area.includes('Todos') || filters.area.includes(item.area);
-      const matchExpurgo = filters.expurgo === 'Todos' || 
-        (filters.expurgo === 'Sim' ? item.expurgo : !item.expurgo);
-      const matchTec = filters.tecnologia.includes('Todos') || filters.tecnologia.includes(item.tecnologia);
-      const matchGrupo = filters.grupoBaixa.includes('Todos') || filters.grupoBaixa.includes(item.grupoBaixa);
-      
-      const itemDate = new Date(item.fullDate);
-      itemDate.setHours(0, 0, 0, 0);
-      
-      let matchDate = true;
-      if (filters.startDate) {
-        const [y, m, d] = filters.startDate.split('-').map(Number);
-        const start = new Date(y, m - 1, d);
-        start.setHours(0, 0, 0, 0);
-        matchDate = matchDate && itemDate >= start;
-      }
-      if (filters.endDate) {
-        const [y, m, d] = filters.endDate.split('-').map(Number);
-        const end = new Date(y, m - 1, d);
-        end.setHours(0, 0, 0, 0);
-        matchDate = matchDate && itemDate <= end;
-      }
-      
-      return matchSemana && matchCidade && matchArea && matchExpurgo && matchTec && matchGrupo && matchDate;
-    });
-  }, [filters, baseData]);
-
-  // Data for Node Chart (Filtered by dropdowns + Selected Baixas)
+  // Data for Node Chart (Filtered by dropdowns + Selected Baixas, but NOT selectedNodes)
   const nodeChartData = useMemo(() => {
     const { current, previous } = comparisonMonths;
-    const data = momFilteredData.filter(d => d.mes === current || d.mes === previous);
-    if (selectedBaixas.length === 0) return data;
-    return data.filter(item => selectedBaixas.includes(item.cdBaixa));
-  }, [momFilteredData, comparisonMonths, selectedBaixas]);
+    const data = filterVisitList(baseData, filters, [], selectedBaixas, { mes: true });
+    return data.filter(d => d.mes === current || d.mes === previous);
+  }, [baseData, filters, selectedBaixas, comparisonMonths, filterVisitList]);
 
-  // Data for Baixa Chart (Filtered by dropdowns + Selected Nodes)
+  // Data for Baixa Chart (Filtered by dropdowns + Selected Nodes, but NOT selectedBaixas)
   const baixaChartData = useMemo(() => {
     const { current, previous } = comparisonMonths;
-    const data = momFilteredData.filter(d => d.mes === current || d.mes === previous);
-    if (selectedNodes.length === 0) return data;
-    return data.filter(item => selectedNodes.includes(item.node));
-  }, [momFilteredData, comparisonMonths, selectedNodes]);
+    const data = filterVisitList(baseData, filters, selectedNodes, [], { mes: true });
+    return data.filter(d => d.mes === current || d.mes === previous);
+  }, [baseData, filters, selectedNodes, comparisonMonths, filterVisitList]);
 
-  // Final Filtered Data (For Metrics - includes all filters)
-  const finalFilteredData = useMemo(() => {
-    let data = filteredData;
-    if (selectedNodes.length > 0) data = data.filter(item => selectedNodes.includes(item.node));
-    if (selectedBaixas.length > 0) data = data.filter(item => selectedBaixas.includes(item.cdBaixa));
-    return data;
-  }, [filteredData, selectedNodes, selectedBaixas]);
+  // Cross-filtering click handlers: clicking any chart element acts as a filter across all charts
+  const handleTechClick = (techName: string) => {
+    setFilters(prev => ({
+      ...prev,
+      tecnologia: prev.tecnologia.includes(techName) && prev.tecnologia.length === 1
+        ? ['Todos']
+        : [techName]
+    }));
+  };
+
+  const handleAreaClick = (areaName: string) => {
+    setFilters(prev => ({
+      ...prev,
+      area: prev.area.includes(areaName) && prev.area.length === 1
+        ? ['Todos']
+        : [areaName]
+    }));
+  };
+
+  const handleGrupoBaixaClick = (grupoName: string) => {
+    setFilters(prev => ({
+      ...prev,
+      grupoBaixa: prev.grupoBaixa.includes(grupoName) && prev.grupoBaixa.length === 1
+        ? ['Todos']
+        : [grupoName]
+    }));
+  };
+
+  const handleNodeClick = (nodeName: string) => {
+    setSelectedNodes(prev => 
+      prev.includes(nodeName) ? prev.filter(n => n !== nodeName) : [nodeName]
+    );
+  };
+
+  const handleBaixaClick = (baixaCode: string) => {
+    setSelectedBaixas(prev => 
+      prev.includes(baixaCode) ? prev.filter(b => b !== baixaCode) : [baixaCode]
+    );
+  };
+
+  const handleTipoOsClick = (tipoName: string) => {
+    setFilters(prev => ({
+      ...prev,
+      tipoOs: prev.tipoOs.includes(tipoName) && prev.tipoOs.length === 1
+        ? ['Todos']
+        : [tipoName]
+    }));
+  };
+
+  const handleTerminalClick = (terminalName: string) => {
+    setFilters(prev => ({
+      ...prev,
+      terminal: prev.terminal && prev.terminal.includes(terminalName) && prev.terminal.length === 1
+        ? ['Todos']
+        : [terminalName]
+    }));
+  };
+
+  const handleCityClick = (cityName: string) => {
+    setFilters(prev => ({
+      ...prev,
+      cidade: prev.cidade.includes(cityName) && prev.cidade.length === 1
+        ? ['Todos']
+        : [cityName]
+    }));
+  };
+
+  const handleSemanaClick = (semanaName: string) => {
+    setFilters(prev => ({
+      ...prev,
+      semana: prev.semana.includes(semanaName) && prev.semana.length === 1
+        ? ['Todos']
+        : [semanaName]
+    }));
+  };
+
+  const handleClearAllCrossFilters = () => {
+    setFilters(prev => ({
+      ...prev,
+      semana: ['Todos'],
+      cidade: ['Todos'],
+      area: ['Todos'],
+      tecnologia: ['Todos'],
+      grupoBaixa: ['Todos'],
+      tipoOs: ['Todos'],
+      terminal: ['Todos']
+    }));
+    setSelectedNodes([]);
+    setSelectedBaixas([]);
+  };
+
+  const hasCrossFilters = useMemo(() => {
+    return (
+      (!filters.semana.includes('Todos') && filters.semana.length > 0) ||
+      (!filters.cidade.includes('Todos') && filters.cidade.length > 0) ||
+      (!filters.area.includes('Todos') && filters.area.length > 0) ||
+      (!filters.tecnologia.includes('Todos') && filters.tecnologia.length > 0) ||
+      (!filters.grupoBaixa.includes('Todos') && filters.grupoBaixa.length > 0) ||
+      (!filters.tipoOs.includes('Todos') && filters.tipoOs.length > 0) ||
+      (!!filters.terminal && !filters.terminal.includes('Todos') && filters.terminal.length > 0) ||
+      selectedNodes.length > 0 ||
+      selectedBaixas.length > 0
+    );
+  }, [filters, selectedNodes, selectedBaixas]);
+
+  const activeFilterChips = useMemo(() => {
+    const chips: { label: string; value: string; onRemove: () => void }[] = [];
+    
+    if (!filters.tecnologia.includes('Todos')) {
+      filters.tecnologia.forEach(t => chips.push({
+        label: 'Tecnologia',
+        value: t,
+        onRemove: () => setFilters(f => ({
+          ...f,
+          tecnologia: f.tecnologia.filter(x => x !== t).length === 0 ? ['Todos'] : f.tecnologia.filter(x => x !== t)
+        }))
+      }));
+    }
+
+    if (!filters.area.includes('Todos')) {
+      filters.area.forEach(a => chips.push({
+        label: 'Área',
+        value: a,
+        onRemove: () => setFilters(f => ({
+          ...f,
+          area: f.area.filter(x => x !== a).length === 0 ? ['Todos'] : f.area.filter(x => x !== a)
+        }))
+      }));
+    }
+
+    if (!filters.grupoBaixa.includes('Todos')) {
+      filters.grupoBaixa.forEach(g => chips.push({
+        label: 'Grupo Baixa',
+        value: g,
+        onRemove: () => setFilters(f => ({
+          ...f,
+          grupoBaixa: f.grupoBaixa.filter(x => x !== g).length === 0 ? ['Todos'] : f.grupoBaixa.filter(x => x !== g)
+        }))
+      }));
+    }
+
+    if (!filters.tipoOs.includes('Todos')) {
+      filters.tipoOs.forEach(t => chips.push({
+        label: 'Tipo OS',
+        value: t,
+        onRemove: () => setFilters(f => ({
+          ...f,
+          tipoOs: f.tipoOs.filter(x => x !== t).length === 0 ? ['Todos'] : f.tipoOs.filter(x => x !== t)
+        }))
+      }));
+    }
+
+    if (filters.terminal && !filters.terminal.includes('Todos')) {
+      filters.terminal.forEach(term => chips.push({
+        label: 'Terminal',
+        value: term,
+        onRemove: () => setFilters(f => ({
+          ...f,
+          terminal: f.terminal.filter(x => x !== term).length === 0 ? ['Todos'] : f.terminal.filter(x => x !== term)
+        }))
+      }));
+    }
+
+    if (!filters.cidade.includes('Todos')) {
+      filters.cidade.forEach(c => chips.push({
+        label: 'Cidade',
+        value: c,
+        onRemove: () => setFilters(f => ({
+          ...f,
+          cidade: f.cidade.filter(x => x !== c).length === 0 ? ['Todos'] : f.cidade.filter(x => x !== c)
+        }))
+      }));
+    }
+
+    if (!filters.semana.includes('Todos')) {
+      filters.semana.forEach(s => chips.push({
+        label: 'Semana',
+        value: s,
+        onRemove: () => setFilters(f => ({
+          ...f,
+          semana: f.semana.filter(x => x !== s).length === 0 ? ['Todos'] : f.semana.filter(x => x !== s)
+        }))
+      }));
+    }
+
+    selectedNodes.forEach(node => chips.push({
+      label: 'Node',
+      value: node,
+      onRemove: () => setSelectedNodes(nodes => nodes.filter(n => n !== node))
+    }));
+
+    selectedBaixas.forEach(baixa => chips.push({
+      label: 'Baixa',
+      value: baixa,
+      onRemove: () => setSelectedBaixas(baixas => baixas.filter(b => b !== baixa))
+    }));
+
+    return chips;
+  }, [filters, selectedNodes, selectedBaixas]);
 
   // Helper for metrics calculation
   const getMetricsSummary = useMemo(() => {
@@ -1298,12 +1549,24 @@ export default function App() {
     return new Date(Math.max(...dates));
   }, [baseData]);
 
-  const chartData = [
-    { name: 'HFC', current: metrics.techDetails.HFC.at1, previous: prevMetrics?.techDetails.HFC.at1 || 0 },
-    { name: 'GPON', current: metrics.techDetails.GPON.at1, previous: prevMetrics?.techDetails.GPON.at1 || 0 },
-    { name: 'HÍBRIDO', current: metrics.techDetails.HÍBRIDO.at1, previous: prevMetrics?.techDetails.HÍBRIDO.at1 || 0 },
-    { name: 'OUTROS', current: metrics.techDetails.OUTROS.at1, previous: prevMetrics?.techDetails.OUTROS.at1 || 0 },
-  ];
+  // AT1 por Tecnologia Data (excludes tecnologia filter so all tech bars are shown, but with other active filters applied)
+  const chartData = useMemo(() => {
+    const techDataCurrent = filterVisitList(baseData, filters, selectedNodes, selectedBaixas, { tecnologia: true });
+    const { previous } = comparisonMonths;
+    const techDataPrev = previous 
+      ? filterVisitList(baseData, filters, selectedNodes, selectedBaixas, { mes: true, tecnologia: true }).filter(d => d.mes === previous)
+      : [];
+
+    const currentTechSummary = getMetricsSummary(techDataCurrent);
+    const prevTechSummary = techDataPrev.length > 0 ? getMetricsSummary(techDataPrev) : null;
+
+    return [
+      { name: 'HFC', current: currentTechSummary.techDetails.HFC.at1, previous: prevTechSummary?.techDetails.HFC.at1 || 0 },
+      { name: 'GPON', current: currentTechSummary.techDetails.GPON.at1, previous: prevTechSummary?.techDetails.GPON.at1 || 0 },
+      { name: 'HÍBRIDO', current: currentTechSummary.techDetails.HÍBRIDO.at1, previous: prevTechSummary?.techDetails.HÍBRIDO.at1 || 0 },
+      { name: 'OUTROS', current: currentTechSummary.techDetails.OUTROS.at1, previous: prevTechSummary?.techDetails.OUTROS.at1 || 0 },
+    ];
+  }, [baseData, filters, selectedNodes, selectedBaixas, comparisonMonths, getMetricsSummary, filterVisitList]);
 
   // Daily Volume Data
   const dailyVolume = useMemo(() => {
@@ -1360,7 +1623,7 @@ export default function App() {
       .filter(d => (d.value !== null && d.value >= 0) || d.previousValue > 0);
   }, [finalFilteredData, momFilteredData, comparisonMonths, filters]);
 
-  // Weekly Volume Data
+  // Weekly Volume Data (excludes semana filter so user sees full distribution and can click any week)
   const weeklyVolume = useMemo(() => {
     const weekMap: Record<string, number> = {
       'S1': 0,
@@ -1370,7 +1633,8 @@ export default function App() {
       'S5': 0
     };
 
-    finalFilteredData.forEach(item => {
+    const dataForWeek = filterVisitList(baseData, filters, selectedNodes, selectedBaixas, { semana: true });
+    dataForWeek.forEach(item => {
       if (item.fullDate instanceof Date && !isNaN(item.fullDate.getTime())) {
         const day = item.fullDate.getDate();
         if (day <= 7) weekMap['S1'] += 1;
@@ -1382,7 +1646,7 @@ export default function App() {
     });
 
     return Object.entries(weekMap).map(([name, value]) => ({ name, value }));
-  }, [finalFilteredData]);
+  }, [baseData, filters, selectedNodes, selectedBaixas, filterVisitList]);
 
   // Top 15 Offending Nodes (Uses nodeChartData)
   const topNodes = useMemo(() => {
@@ -1483,10 +1747,11 @@ export default function App() {
     return result.sort((a, b) => b.current - a.current);
   }, [baixaChartData, selectedBaixas, comparisonMonths, metrics, prevMetrics]);
 
-  // Volume por Área
+  // Volume por Área (excludes area filter so all areas can be viewed and clicked)
   const areaData = useMemo(() => {
     const areaMap: Record<string, number> = {};
-    finalFilteredData.forEach(item => {
+    const dataForArea = filterVisitList(baseData, filters, selectedNodes, selectedBaixas, { area: true });
+    dataForArea.forEach(item => {
       if (item.area && item.area !== 'N/A') {
         areaMap[item.area] = (areaMap[item.area] || 0) + (item.volume || 1);
       }
@@ -1494,15 +1759,16 @@ export default function App() {
     return Object.entries(areaMap)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
-  }, [finalFilteredData]);
+  }, [baseData, filters, selectedNodes, selectedBaixas, filterVisitList]);
 
-  // Volume por Terminal
+  // Volume por Terminal (excludes terminal filter)
   const terminalData = useMemo(() => {
     const { current, previous } = comparisonMonths;
     const currentMap: Record<string, number> = {};
     const prevMap: Record<string, number> = {};
     
-    const data = momFilteredData.filter(d => d.mes === current || d.mes === previous);
+    const data = filterVisitList(baseData, filters, selectedNodes, selectedBaixas, { mes: true, terminal: true })
+      .filter(d => d.mes === current || d.mes === previous);
     
     data.forEach(item => {
       if (item.terminal && item.terminal !== 'N/A') {
@@ -1520,9 +1786,9 @@ export default function App() {
       current: currentMap[name] || 0,
       previous: prevMap[name] || 0
     })).sort((a, b) => b.current - a.current).slice(0, 15);
-  }, [momFilteredData, comparisonMonths]);
+  }, [baseData, filters, selectedNodes, selectedBaixas, comparisonMonths, filterVisitList]);
 
-  // Volume por Grupo de Baixa
+  // Volume por Grupo de Baixa (excludes grupoBaixa filter)
   const grupoBaixaData = useMemo(() => {
     const { current, previous } = comparisonMonths;
     const currentMap: Record<string, number> = {};
@@ -1532,7 +1798,8 @@ export default function App() {
     const currentBase = metrics.details.base || 1;
     const previousBase = prevMetrics?.details.base || 1;
     
-    const data = momFilteredData.filter(d => d.mes === current || d.mes === previous);
+    const data = filterVisitList(baseData, filters, selectedNodes, selectedBaixas, { mes: true, grupoBaixa: true })
+      .filter(d => d.mes === current || d.mes === previous);
     
     data.forEach(item => {
       if (item.grupoBaixa && item.grupoBaixa !== 'N/A') {
@@ -1559,47 +1826,89 @@ export default function App() {
         impactPrev: Number(impactPrev.toFixed(2))
       };
     }).sort((a, b) => b.current - a.current);
-  }, [momFilteredData, comparisonMonths, metrics, prevMetrics]);
+  }, [baseData, filters, selectedNodes, selectedBaixas, comparisonMonths, metrics, prevMetrics, filterVisitList]);
+
+  // Volume por Tipo de OS (excludes tipoOs filter)
+  const tipoOsData = useMemo(() => {
+    const { current, previous } = comparisonMonths;
+    const currentMap: Record<string, number> = {};
+    const prevMap: Record<string, number> = {};
+    
+    const currentBase = metrics.details.base || 1;
+    const previousBase = prevMetrics?.details.base || 1;
+    
+    const data = filterVisitList(baseData, filters, selectedNodes, selectedBaixas, { mes: true, tipoOs: true })
+      .filter(d => d.mes === current || d.mes === previous);
+    
+    data.forEach(item => {
+      const tipo = item.tipoOs || 'NÃO INFORMADO';
+      if (item.mes === current) {
+        currentMap[tipo] = (currentMap[tipo] || 0) + (item.volume || 1);
+      } else if (item.mes === previous) {
+        prevMap[tipo] = (prevMap[tipo] || 0) + (item.volume || 1);
+      }
+    });
+    
+    // Fallback if data has no month match but finalFilteredData has data
+    if (Object.keys(currentMap).length === 0 && finalFilteredData.length > 0) {
+      finalFilteredData.forEach(item => {
+        const tipo = item.tipoOs || 'NÃO INFORMADO';
+        currentMap[tipo] = (currentMap[tipo] || 0) + (item.volume || 1);
+      });
+    }
+
+    const allTipos = [...new Set([...Object.keys(currentMap), ...Object.keys(prevMap)])];
+    return allTipos.map(name => {
+      const currentVal = currentMap[name] || 0;
+      const previousVal = prevMap[name] || 0;
+      const impact = (currentVal / currentBase) * 100;
+      const impactPrev = (previousVal / previousBase) * 100;
+      
+      return {
+        name,
+        current: currentVal,
+        previous: previousVal,
+        impact: Number(impact.toFixed(2)),
+        impactPrev: Number(impactPrev.toFixed(2)),
+        total: currentVal + previousVal
+      };
+    }).sort((a, b) => b.current - a.current);
+  }, [baseData, filters, selectedNodes, selectedBaixas, comparisonMonths, metrics, prevMetrics, finalFilteredData, filterVisitList]);
 
   // Base Data Aggregations for Charts
   const baseMetrics = useMemo(() => {
     const cityMap: Record<string, number> = {};
     const techMap: Record<string, number> = { 'HFC': 0, 'GPON': 0, 'HÍBRIDO': 0, 'OUTROS': 0 };
 
-    const normCityFilters = filters.cidade.map(c => normalizeStr(c));
     const normTechFilters = filters.tecnologia.map(t => normalizeStr(t));
-
-    const isTodos = filters.cidade.includes('Todos');
     const isTechTodos = filters.tecnologia.includes('Todos');
 
     baseCidadeData.forEach(item => {
       const normCity = normalizeStr(item.cidade);
       const normTech = normalizeStr(item.tecnologia);
 
-      // If "Todos", exclude total/regional rows from charts and aggregations
-      if (isTodos) {
-        const isTotalOrRegional = 
-          normCity.includes('TOTAL') || 
-          normCity.includes('GERAL') || 
-          normCity.includes('SUM') ||
-          normCity === 'NORTE' || 
-          normCity === 'SUL' || 
-          normCity === 'LESTE' || 
-          normCity === 'OESTE' ||
-          normCity === 'REGIONAL';
-        
-        if (isTotalOrRegional) return;
-      }
-
-      const matchCity = isTodos || normCityFilters.some(cf => 
-        normCity === cf || normCity.includes(cf) || cf.includes(normCity)
-      );
+      const isTotalOrRegional = 
+        normCity.includes('TOTAL') || 
+        normCity.includes('GERAL') || 
+        normCity.includes('SUM') ||
+        normCity === 'NORTE' || 
+        normCity === 'SUL' || 
+        normCity === 'LESTE' || 
+        normCity === 'OESTE' ||
+        normCity === 'REGIONAL';
       
+      if (isTotalOrRegional) return;
+
       const matchTech = isTechTodos || normTechFilters.includes(normTech);
 
-      if (matchCity && matchTech) {
+      if (matchTech) {
         cityMap[item.cidade] = (cityMap[item.cidade] || 0) + item.base;
-        techMap[item.tecnologia] = (techMap[item.tecnologia] || 0) + item.base;
+      }
+
+      if (techMap[item.tecnologia] !== undefined) {
+        techMap[item.tecnologia] += item.base;
+      } else {
+        techMap['OUTROS'] += item.base;
       }
     });
 
@@ -1624,26 +1933,21 @@ export default function App() {
     }
 
     return { cityData, techData };
-  }, [baseCidadeData, filters]);
+  }, [baseCidadeData, filters.tecnologia]);
 
-  // AT1 by City Projection Data
+  // AT1 by City Projection Data (excludes cidade filter so all cities can be viewed and clicked)
   const at1ByCityData = useMemo(() => {
     const { previous } = comparisonMonths;
     
-    // Prepare previous month filtered data
+    // Prepare current and previous month filtered data (excluding cidade filter)
+    const currentCityData = filterVisitList(baseData, filters, selectedNodes, selectedBaixas, { cidade: true });
     const prevFilteredData = previous 
-      ? momFilteredData.filter(d => 
-          d.mes === previous && 
-          (selectedNodes.length === 0 || selectedNodes.includes(d.node)) && 
-          (selectedBaixas.length === 0 || selectedBaixas.includes(d.cdBaixa))
-        )
+      ? filterVisitList(baseData, filters, selectedNodes, selectedBaixas, { mes: true, cidade: true }).filter(d => d.mes === previous)
       : [];
 
     const getCityStats = (visitData: VisitData[]) => {
       const cityMap: Record<string, { name: string, osExec: number, dates: Set<string>, base: number }> = {};
       
-      const isTodos = filters.cidade.includes('Todos');
-      const normCityFilters = filters.cidade.map(c => normalizeStr(c).replace(/\s+/g, ''));
       const normTechFilters = filters.tecnologia.map(t => normalizeStr(t));
       const isTechTodos = filters.tecnologia.includes('Todos');
 
@@ -1653,26 +1957,19 @@ export default function App() {
         const normCityKey = normCity.replace(/\s+/g, '');
         const normTech = normalizeStr(item.tecnologia);
 
-        const matchCity = isTodos || normCityFilters.some(cf => 
-          normCityKey === cf || normCityKey.includes(cf) || cf.includes(normCityKey)
-        );
-        
         const matchTech = isTechTodos || normTechFilters.includes(normTech);
 
-        if (matchCity && matchTech) {
-          // Exclude total/regional rows if "Todos" is selected
-          if (isTodos) {
-            const isTotalOrRegional = 
-              normCityKey.includes('TOTAL') || 
-              normCityKey.includes('GERAL') || 
-              normCityKey.includes('SUM') ||
-              normCityKey === 'NORTE' || 
-              normCityKey === 'SUL' || 
-              normCityKey === 'LESTE' || 
-              normCityKey === 'OESTE' ||
-              normCityKey === 'REGIONAL';
-            if (isTotalOrRegional) return;
-          }
+        if (matchTech) {
+          const isTotalOrRegional = 
+            normCityKey.includes('TOTAL') || 
+            normCityKey.includes('GERAL') || 
+            normCityKey.includes('SUM') ||
+            normCityKey === 'NORTE' || 
+            normCityKey === 'SUL' || 
+            normCityKey === 'LESTE' || 
+            normCityKey === 'OESTE' ||
+            normCityKey === 'REGIONAL';
+          if (isTotalOrRegional) return;
 
           if (!cityMap[normCityKey]) {
             cityMap[normCityKey] = { name: item.cidade, osExec: 0, dates: new Set(), base: 0 };
@@ -1686,7 +1983,6 @@ export default function App() {
       visitData.forEach(item => {
         const normCityItem = normalizeStr(item.cidade).replace(/\s+/g, '');
         
-        // Find the best matching key in cityMap
         let matchedKey = cityMap[normCityItem] ? normCityItem : cityKeys.find(key => 
           key === normCityItem || key.includes(normCityItem) || normCityItem.includes(key)
         );
@@ -1703,7 +1999,7 @@ export default function App() {
       return cityMap;
     };
 
-    const currentMap = getCityStats(finalFilteredData);
+    const currentMap = getCityStats(currentCityData);
     const previousMap = getCityStats(prevFilteredData);
 
     const diasMes = metrics.details.diasMes || 30;
@@ -1740,7 +2036,7 @@ export default function App() {
     })
     .filter(item => item.current > 0 || item.previous > 0)
     .sort((a, b) => b.current - a.current);
-  }, [finalFilteredData, momFilteredData, baseCidadeData, filters, metrics, comparisonMonths, selectedNodes, selectedBaixas]);
+  }, [baseData, baseCidadeData, filters, metrics, comparisonMonths, selectedNodes, selectedBaixas, filterVisitList]);
 
   const COLORS = [CLARO_RED, '#666666', '#999999'];
 
@@ -1846,8 +2142,14 @@ export default function App() {
       const mappedData: VisitData[] = [];
       const chunkSize = 1000;
       let currentIndex = 0;
+      cancelImportRef.current = false;
 
       const processChunk = () => {
+        if (cancelImportRef.current) {
+          setIsImporting(false);
+          setImportProgress(0);
+          return;
+        }
         try {
           const end = Math.min(currentIndex + chunkSize, rawRows.length);
           for (let i = currentIndex; i < end; i++) {
@@ -1922,8 +2224,55 @@ export default function App() {
               'N/A'
             ).trim();
 
+            const rawTipoOs = String(
+              row['TIPO DE OS'] ||
+              row['TIPO DE ORDEM'] ||
+              row['TIPO DA OS'] ||
+              row['TIPO_DE_OS'] ||
+              row.TIPO_OS ||
+              row.tipo_os ||
+              row.tipoOs ||
+              row.tipoOS ||
+              row.TIPOOS ||
+              row.TP_OS ||
+              row.TP_ORDEM ||
+              row['TIPO SERVIÇO'] ||
+              row['TIPO DE SERVIÇO'] ||
+              row.TIPO_SERVICO ||
+              row.TIPO_SERVICO_OS ||
+              row.DSC_TIPO_OS ||
+              row.DS_TIPO_OS ||
+              row.NM_TIPO_OS ||
+              row.WO_TP_ATIVIDADE ||
+              row.TIPO_ATIVIDADE ||
+              row.TIPO_ORDEM ||
+              row.TIPO ||
+              row.tipo ||
+              'REPARO'
+            ).trim().toUpperCase();
+
+            const rawContrato = String(
+              row.CONTRATO ||
+              row.contrato ||
+              row['CONTRATO / OS'] ||
+              row['CONTRATO/OS'] ||
+              row.NR_CONTRATO ||
+              row.NUM_CONTRATO ||
+              row.NUMERO_CONTRATO ||
+              row.NR_OS ||
+              row.NUM_OS ||
+              row.OS ||
+              row.os ||
+              row.ID_OS ||
+              row.WO_NUMBER ||
+              row.ORDEM ||
+              row.NR_ORDEM ||
+              `OS-${i + 1}`
+            ).trim();
+
             mappedData.push({
               id: `import-${i}`,
+              contrato: rawContrato,
               mes: mesValue,
               fullDate: fullDateValue,
               cidade: cidade,
@@ -1937,7 +2286,8 @@ export default function App() {
               descriptionBaixa: descBaixa,
               grupoBaixa: rawGrupoBaixa,
               terminal: String(row.TERMINAL || row.terminal || row.Terminal || row.CD_TERMINAL || row.NM_TERMINAL || row.NOME_TERMINAL || row.Terminal_ID || 'N/A').trim(),
-              volume: Number(row.VOLUME || row.volume || row.Volume || row.QUANTIDADE || row.QTD || 1)
+              volume: Number(row.VOLUME || row.volume || row.Volume || row.QUANTIDADE || row.QTD || 1),
+              tipoOs: rawTipoOs && rawTipoOs !== 'N/A' && rawTipoOs !== 'UNDEFINED' ? rawTipoOs : 'REPARO'
             });
           }
 
@@ -1970,6 +2320,8 @@ export default function App() {
                 expurgo: 'Todos',
                 tecnologia: ['Todos'],
                 grupoBaixa: ['Todos'],
+                tipoOs: ['Todos'],
+                terminal: ['Todos'],
                 startDate: '',
                 endDate: ''
               });
@@ -2019,6 +2371,7 @@ export default function App() {
     const targetUrl = (typeof urlToLoad === 'string' ? urlToLoad : null) || githubUrl || preConfiguredUrl;
     if (!targetUrl) return;
 
+    cancelImportRef.current = false;
     setIsImporting(true);
     setImportProgress(20);
     setImportError(null);
@@ -2026,12 +2379,15 @@ export default function App() {
     try {
       setImportProgress(40);
       const arrayBuffer = await fetchGithubFileArrayBuffer(targetUrl);
+      if (cancelImportRef.current) return;
       setImportProgress(70);
       processExcelData(arrayBuffer);
       setShowGithubInput(false);
       setGithubUrl('');
     } catch (err: any) {
-      setImportError(err.message || 'Erro ao carregar do GitHub.');
+      if (!cancelImportRef.current) {
+        setImportError(err.message || 'Erro ao carregar do GitHub.');
+      }
       setIsImporting(false);
     }
   };
@@ -2314,6 +2670,36 @@ export default function App() {
                   <div className="flex flex-wrap items-center gap-3">
                     {baseData.length > 0 && (
                       <>
+                        {/* View Mode Toggle: Gráficos vs Analítico */}
+                        <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+                          <button
+                            id="btn-view-at1-dashboard"
+                            onClick={() => setAt1ViewMode('dashboard')}
+                            className={cn(
+                              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase italic transition-all cursor-pointer",
+                              at1ViewMode === 'dashboard'
+                                ? "bg-white text-slate-900 shadow-xs"
+                                : "text-slate-500 hover:text-slate-800"
+                            )}
+                          >
+                            <BarChart3 className="w-3.5 h-3.5 text-[#EE1D23]" />
+                            <span>Gráficos</span>
+                          </button>
+                          <button
+                            id="btn-view-at1-analitico"
+                            onClick={() => setAt1ViewMode('analitico')}
+                            className={cn(
+                              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase italic transition-all cursor-pointer",
+                              at1ViewMode === 'analitico'
+                                ? "bg-[#EE1D23] text-white shadow-xs"
+                                : "text-slate-500 hover:text-slate-800"
+                            )}
+                          >
+                            <Layers className="w-3.5 h-3.5" />
+                            <span>Visão Analítica</span>
+                          </button>
+                        </div>
+
                         <button
                           onClick={() => handleGithubLoad(getGithubAt1Url())}
                           className="flex items-center gap-2 bg-[#EE1D23] hover:bg-red-600 text-white font-black py-2 px-4 rounded-xl transition-all shadow-md shadow-red-500/15 active:scale-95 uppercase italic text-xs cursor-pointer"
@@ -2366,37 +2752,43 @@ export default function App() {
               </header>
 
               {isImporting && (
-        <div className="fixed inset-0 z-[100] bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center p-6">
-          <div className="w-full max-w-md bg-white p-8 rounded-[32px] shadow-2xl border border-slate-100 text-center">
-            <div className="w-20 h-20 bg-red-50 rounded-2xl flex items-center justify-center mb-6 mx-auto animate-pulse">
-              <FileSpreadsheet className="w-10 h-10 text-[#EE1D23]" />
-            </div>
-            <h3 className="text-2xl font-black text-[#333333] uppercase italic tracking-tighter mb-2">Importando Dados</h3>
-            <p className="text-slate-500 font-bold mb-8 italic">Processando arquivo analítico...</p>
-            
-            <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden mb-4">
-              <div 
-                className="h-full bg-[#EE1D23] transition-all duration-300 ease-out"
-                style={{ width: `${importProgress}%` }}
-              />
-            </div>
-            <div className="flex justify-between items-center px-1">
-              <span className="text-xs font-black text-[#EE1D23] uppercase tracking-widest">{importProgress}%</span>
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Aguarde...</span>
-            </div>
-            
-            <button
-              onClick={() => {
-                setIsImporting(false);
-                setImportProgress(0);
-              }}
-              className="mt-8 text-xs font-black text-slate-400 hover:text-red-500 uppercase tracking-widest transition-colors"
-            >
-              Cancelar Importação
-            </button>
-          </div>
-        </div>
-      )}
+                <div className="fixed inset-0 z-[100] bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center p-6">
+                  <div className="w-full max-w-md bg-white p-8 rounded-[32px] shadow-2xl border border-slate-100 text-center">
+                    <div className="w-20 h-20 bg-red-50 rounded-2xl flex items-center justify-center mb-6 mx-auto animate-pulse">
+                      <RotateCcw className="w-10 h-10 text-[#EE1D23]" />
+                    </div>
+                    <h3 className="text-2xl font-black text-[#333333] uppercase italic tracking-tighter mb-2">
+                      IMPORTANDO BASE AT1
+                    </h3>
+                    <p className="text-slate-500 font-bold mb-8 italic">
+                      Lendo contratos, cidades, notas AT1 e ordens de serviço...
+                    </p>
+                    
+                    <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden mb-4">
+                      <div 
+                        className="h-full bg-[#EE1D23] transition-all duration-300 ease-out"
+                        style={{ width: `${importProgress}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between items-center px-1">
+                      <span className="text-xs font-black text-[#EE1D23] uppercase tracking-widest">{importProgress}%</span>
+                      <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">AGUARDE...</span>
+                    </div>
+                    
+                    <button
+                      id="btn-cancel-import-at1"
+                      onClick={() => {
+                        cancelImportRef.current = true;
+                        setIsImporting(false);
+                        setImportProgress(0);
+                      }}
+                      className="mt-8 text-xs font-black text-slate-400 hover:text-red-500 uppercase tracking-widest transition-colors cursor-pointer"
+                    >
+                      CANCELAR
+                    </button>
+                  </div>
+                </div>
+              )}
 
       {baseData.length === 0 ? (
         <section className="max-w-2xl mx-auto mt-8 sm:mt-12 px-4">
@@ -2471,9 +2863,42 @@ export default function App() {
           {/* Filters Bar */}
           <section className="max-w-7xl mx-auto mb-8">
         <div className="bg-white p-6 rounded-2xl shadow-md border-t-4 border-[#EE1D23]">
-          <div className="flex items-center gap-2 mb-6 text-[#333333] font-black uppercase italic tracking-tight">
-            <Filter className="w-4 h-4 text-[#EE1D23]" />
-            <h2>Filtros de Pesquisa</h2>
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2 text-[#333333] font-black uppercase italic tracking-tight">
+              <Filter className="w-4 h-4 text-[#EE1D23]" />
+              <h2>Filtros de Pesquisa</h2>
+            </div>
+            {(!filters.mes.includes('Todos') ||
+              !filters.semana.includes('Todos') ||
+              !filters.cidade.includes('Todos') ||
+              !filters.area.includes('Todos') ||
+              filters.expurgo !== 'Todos' ||
+              !filters.tecnologia.includes('Todos') ||
+              !filters.grupoBaixa.includes('Todos') ||
+              !filters.tipoOs.includes('Todos') ||
+              Boolean(filters.startDate) ||
+              Boolean(filters.endDate)) && (
+              <button
+                onClick={() => setFilters({
+                  mes: ['Todos'],
+                  semana: ['Todos'],
+                  cidade: ['Todos'],
+                  area: ['Todos'],
+                  expurgo: 'Todos',
+                  tecnologia: ['Todos'],
+                  grupoBaixa: ['Todos'],
+                  tipoOs: ['Todos'],
+                  terminal: ['Todos'],
+                  startDate: '',
+                  endDate: ''
+                })}
+                className="flex items-center gap-1.5 text-xs font-black text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-xl transition-all"
+                title="Limpar todos os filtros"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Limpar Filtros</span>
+              </button>
+            )}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
             <MultiFilterSelect 
@@ -2525,6 +2950,13 @@ export default function App() {
               options={filterOptions.gruposBaixa}
               onChange={(v) => setFilters(f => ({ ...f, grupoBaixa: v }))}
             />
+            <MultiFilterSelect 
+              label="Tipo de OS" 
+              icon={<Wrench className="w-3.5 h-3.5" />}
+              value={filters.tipoOs}
+              options={filterOptions.tiposOs}
+              onChange={(v) => setFilters(f => ({ ...f, tipoOs: v }))}
+            />
             <div className="flex flex-col gap-1.5">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Início</label>
               <input 
@@ -2547,8 +2979,49 @@ export default function App() {
         </div>
       </section>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto space-y-8">
+      {/* Main Content: Visão Analítica ou Dashboard de Gráficos */}
+      {at1ViewMode === 'analitico' ? (
+        <div className="w-full">
+          <At1AnaliticoTable data={filteredData} totalDataCount={baseData.length} />
+        </div>
+      ) : (
+        <>
+          <main className="max-w-7xl mx-auto space-y-8">
+        {/* Active Cross-Filters Notification Banner */}
+        {hasCrossFilters && (
+          <div className="bg-red-50/90 border border-red-200 p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-2 text-xs font-black text-red-700 uppercase tracking-wide">
+              <MousePointerClick className="w-4 h-4 text-[#EE1D23] animate-pulse" />
+              <span>Filtros Interativos Ativos ({activeFilterChips.length}):</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {activeFilterChips.map((chip, idx) => (
+                <span
+                  key={`${chip.label}-${chip.value}-${idx}`}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-white text-slate-700 border border-red-200 text-xs font-bold rounded-lg shadow-2xs hover:border-red-400 transition-colors"
+                >
+                  <span className="text-[10px] text-slate-400 font-semibold uppercase">{chip.label}:</span>
+                  <span className="text-[#EE1D23] font-black">{chip.value}</span>
+                  <button
+                    onClick={chip.onRemove}
+                    className="ml-1 text-slate-400 hover:text-red-600 rounded-full hover:bg-red-50 p-0.5 transition-colors cursor-pointer"
+                    title="Remover filtro"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+              <button
+                onClick={handleClearAllCrossFilters}
+                className="text-xs font-black text-red-600 hover:text-white bg-white hover:bg-[#EE1D23] border border-red-300 px-3 py-1 rounded-lg transition-all flex items-center gap-1 shadow-2xs cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3" />
+                Limpar Todos
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Volume Metrics */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <MetricCard 
@@ -2904,18 +3377,38 @@ export default function App() {
 
           {/* Weekly Volume Chart */}
           <div className="bg-white p-8 rounded-3xl shadow-md border border-slate-100">
-            <div className="flex items-center gap-3 mb-8">
-              <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center">
-                <Calendar className="w-5 h-5 text-[#333333]" />
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center">
+                  <Calendar className="w-5 h-5 text-[#333333]" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tighter">Volume Semanal</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">S1 a S5 (7 dias cada) • Clique para filtrar</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tighter">Volume Semanal</h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">S1 a S5 (7 dias cada)</p>
-              </div>
+              {!filters.semana.includes('Todos') && filters.semana.length > 0 && (
+                <button
+                  onClick={() => setFilters(f => ({ ...f, semana: ['Todos'] }))}
+                  className="text-[10px] font-black text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded-xl transition-colors flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  {filters.semana.join(', ')}
+                </button>
+              )}
             </div>
             <div className="h-[280px] w-full min-h-[280px]">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <BarChart data={weeklyVolume} margin={{ top: 20 }}>
+                <BarChart 
+                  data={weeklyVolume} 
+                  margin={{ top: 20 }}
+                  onClick={(data) => {
+                    if (data && data.activeLabel) {
+                      handleSemanaClick(String(data.activeLabel));
+                    }
+                  }}
+                  className="cursor-pointer"
+                >
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis 
                     dataKey="name" 
@@ -2928,7 +3421,13 @@ export default function App() {
                     cursor={{ fill: '#f8fafc' }}
                     contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold' }}
                   />
-                  <Bar dataKey="value" fill="#EE1D23" radius={[8, 8, 0, 0]} barSize={40} minPointSize={2}>
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]} barSize={40} minPointSize={2}>
+                    {weeklyVolume.map((entry, index) => (
+                      <Cell 
+                        key={`cell-week-${index}`} 
+                        fill={filters.semana.includes(entry.name) ? '#991B1B' : '#EE1D23'} 
+                      />
+                    ))}
                     <LabelList dataKey="value" position="top" style={{ fill: '#EE1D23', fontSize: 12, fontWeight: 900 }} />
                   </Bar>
                 </BarChart>
@@ -2939,8 +3438,11 @@ export default function App() {
           {/* AT1 by Tech Chart */}
           <div className="lg:col-span-2 bg-white p-8 rounded-3xl shadow-md border border-slate-100">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-10 gap-4">
-              <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tight">AT1 por Tecnologia</h3>
-              <div className="flex gap-4">
+              <div>
+                <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tight">AT1 por Tecnologia</h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Clique nas barras para filtrar por tecnologia</p>
+              </div>
+              <div className="flex items-center gap-4">
                 {/* Previous month first */}
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-sm bg-[#cbd5e1]" />
@@ -2951,12 +3453,30 @@ export default function App() {
                   <div className="w-3 h-3 rounded-sm bg-[#EE1D23]" />
                   <span className="text-[10px] text-slate-500 font-black uppercase tracking-tighter">{comparisonMonths.current} (AT1)</span>
                 </div>
+                {!filters.tecnologia.includes('Todos') && filters.tecnologia.length > 0 && (
+                  <button
+                    onClick={() => setFilters(f => ({ ...f, tecnologia: ['Todos'] }))}
+                    className="text-[10px] font-black text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded-xl transition-colors flex items-center gap-1"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    {filters.tecnologia.join(', ')}
+                  </button>
+                )}
               </div>
             </div>
             
             <div className="h-[280px] w-full min-h-[280px]">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <BarChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+                <BarChart 
+                  data={chartData} 
+                  margin={{ top: 20, right: 30, left: 0, bottom: 0 }}
+                  onClick={(data) => {
+                    if (data && data.activeLabel) {
+                      handleTechClick(String(data.activeLabel));
+                    }
+                  }}
+                  className="cursor-pointer"
+                >
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis 
                     dataKey="name" 
@@ -2985,7 +3505,13 @@ export default function App() {
                   <Bar dataKey="previous" name={comparisonMonths.previous || 'Anterior'} fill="#cbd5e1" radius={[4, 4, 0, 0]} barSize={25}>
                     <LabelList dataKey="previous" position="top" formatter={(val: number) => formatPercent(val)} style={{ fontSize: 10, fontWeight: 800, fill: '#94a3b8' }} />
                   </Bar>
-                  <Bar dataKey="current" name={comparisonMonths.current || 'Atual'} fill="#EE1D23" radius={[4, 4, 0, 0]} barSize={25}>
+                  <Bar dataKey="current" name={comparisonMonths.current || 'Atual'} radius={[4, 4, 0, 0]} barSize={25}>
+                    {chartData.map((entry, index) => (
+                      <Cell 
+                        key={`cell-tech-${index}`} 
+                        fill={filters.tecnologia.includes(entry.name) ? '#991B1B' : '#EE1D23'} 
+                      />
+                    ))}
                     <LabelList dataKey="current" position="top" formatter={(val: number) => formatPercent(val)} style={{ fontSize: 10, fontWeight: 800, fill: '#EE1D23' }} />
                   </Bar>
                 </BarChart>
@@ -2995,18 +3521,39 @@ export default function App() {
 
           {/* Volume por Área Chart */}
           <div className="bg-white p-8 rounded-3xl shadow-md border border-slate-100">
-            <div className="flex items-center gap-3 mb-8">
-              <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center">
-                <MapPin className="w-5 h-5 text-[#EE1D23]" />
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center">
+                  <MapPin className="w-5 h-5 text-[#EE1D23]" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tighter">Volume por Área</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Distribuição por região • Clique para filtrar</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tighter">Volume por Área</h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Distribuição por região</p>
-              </div>
+              {!filters.area.includes('Todos') && filters.area.length > 0 && (
+                <button
+                  onClick={() => setFilters(f => ({ ...f, area: ['Todos'] }))}
+                  className="text-[10px] font-black text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded-xl transition-colors flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  {filters.area.join(', ')}
+                </button>
+              )}
             </div>
             <div className="h-[400px] w-full min-h-[400px]">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <BarChart data={areaData} layout="vertical" margin={{ left: 40, right: 40 }}>
+                <BarChart 
+                  data={areaData} 
+                  layout="vertical" 
+                  margin={{ left: 40, right: 40 }}
+                  onClick={(data) => {
+                    if (data && data.activeLabel) {
+                      handleAreaClick(String(data.activeLabel));
+                    }
+                  }}
+                  className="cursor-pointer"
+                >
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                   <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10, fontWeight: 600 }} />
                   <YAxis 
@@ -3021,7 +3568,13 @@ export default function App() {
                     cursor={{ fill: '#f8fafc' }}
                     contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold' }}
                   />
-                  <Bar dataKey="value" fill="#EE1D23" radius={[0, 8, 8, 0]} barSize={20}>
+                  <Bar dataKey="value" radius={[0, 8, 8, 0]} barSize={20}>
+                    {areaData.map((entry, index) => (
+                      <Cell 
+                        key={`cell-area-${index}`} 
+                        fill={filters.area.includes(entry.name) ? '#991B1B' : '#EE1D23'} 
+                      />
+                    ))}
                     <LabelList dataKey="value" position="right" style={{ fill: '#EE1D23', fontSize: 11, fontWeight: 900 }} />
                   </Bar>
                 </BarChart>
@@ -3029,19 +3582,214 @@ export default function App() {
             </div>
           </div>
 
+          {/* Volume por Tipo de OS Chart */}
+          <div className="lg:col-span-3 bg-white p-8 rounded-3xl shadow-md border border-slate-100">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center">
+                  <Wrench className="w-5 h-5 text-[#EE1D23]" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tighter">Volume por Tipo de OS</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Distribuição e comparativo de ordens de serviço por tipo</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-4">
+                {comparisonMonths.previous && (
+                  <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-[#cbd5e1]" />
+                    <span className="text-[9px] font-bold text-slate-500 uppercase">{comparisonMonths.previous}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#EE1D23]" />
+                  <span className="text-[9px] font-bold text-slate-500 uppercase">{comparisonMonths.current || 'Atual'}</span>
+                </div>
+                {filters.tipoOs.length > 0 && !filters.tipoOs.includes('Todos') && (
+                  <button
+                    onClick={() => setFilters(f => ({ ...f, tipoOs: ['Todos'] }))}
+                    className="text-[10px] font-black text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-xl transition-colors flex items-center gap-1.5"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    Limpar Filtro ({filters.tipoOs.join(', ')})
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Quick interactive pills */}
+            {tipoOsData.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-6">
+                {tipoOsData.map(item => {
+                  const isSelected = filters.tipoOs.includes(item.name);
+                  return (
+                    <button
+                      key={item.name}
+                      onClick={() => {
+                        setFilters(prev => ({
+                          ...prev,
+                          tipoOs: prev.tipoOs.includes(item.name) && prev.tipoOs.length === 1
+                            ? ['Todos']
+                            : [item.name]
+                        }));
+                      }}
+                      className={cn(
+                        "px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 border",
+                        isSelected
+                          ? "bg-[#EE1D23] text-white border-[#EE1D23] shadow-sm"
+                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                      )}
+                    >
+                      <span>{item.name}</span>
+                      <span className={cn(
+                        "px-1.5 py-0.5 rounded-md text-[10px] font-bold",
+                        isSelected ? "bg-white/20 text-white" : "bg-white text-slate-500 border border-slate-200"
+                      )}>
+                        {item.current.toLocaleString('pt-BR')}
+                      </span>
+                      {item.impact > 0 && (
+                        <span className={cn(
+                          "text-[9px] font-bold",
+                          isSelected ? "text-white/80" : "text-slate-400"
+                        )}>
+                          ({formatPercent(item.impact)})
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="w-full" style={{ height: `${Math.max(260, tipoOsData.length * 48)}px` }}>
+              {tipoOsData.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-2">
+                  <Wrench className="w-8 h-8 opacity-40" />
+                  <p className="text-xs font-bold uppercase tracking-wider">Nenhum dado encontrado para os filtros selecionados</p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                  <BarChart 
+                    data={tipoOsData} 
+                    layout="vertical" 
+                    margin={{ left: 20, right: 140, top: 10, bottom: 10 }}
+                    barGap={4}
+                    barCategoryGap={16}
+                    onClick={(data) => {
+                      if (data && data.activeLabel) {
+                        const tipo = String(data.activeLabel);
+                        setFilters(prev => ({
+                          ...prev,
+                          tipoOs: prev.tipoOs.includes(tipo) && prev.tipoOs.length === 1 
+                            ? ['Todos'] 
+                            : [tipo]
+                        }));
+                      }
+                    }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                    <XAxis type="number" hide />
+                    <YAxis 
+                      dataKey="name" 
+                      type="category" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#333333', fontSize: 11, fontWeight: 800 }} 
+                      width={180}
+                    />
+                    <Tooltip 
+                      cursor={{ fill: '#f8fafc' }}
+                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold' }}
+                      formatter={(val: number, name: string) => [
+                        typeof val === 'number' ? val.toLocaleString('pt-BR') : val,
+                        name === 'current' ? (comparisonMonths.current || 'Atual') : (comparisonMonths.previous || 'Anterior')
+                      ]}
+                    />
+                    <Bar dataKey="previous" name={comparisonMonths.previous || 'Anterior'} fill="#cbd5e1" radius={[0, 8, 8, 0]} barSize={14}>
+                      <LabelList 
+                        dataKey="previous" 
+                        position="right" 
+                        content={(props: any) => {
+                          const { x, y, width, height, value, payload } = props;
+                          if (value === undefined || value === null) return null;
+                          const data = payload && payload.payload ? payload.payload : payload;
+                          const impactValue = (data && data.impactPrev !== undefined) ? formatPercent(data.impactPrev) : undefined;
+                          const yCenter = y + (height ? height / 2 : 7);
+                          return (
+                            <g>
+                              <text 
+                                x={x + width + 8} 
+                                y={yCenter} 
+                                dominantBaseline="central"
+                                fill="#94a3b8" 
+                                fontSize={10} 
+                                fontWeight={900} 
+                                textAnchor="start"
+                              >
+                                {typeof value === 'number' ? value.toLocaleString('pt-BR') : value}
+                                {impactValue !== undefined && (
+                                  <tspan dx={6} fill="#94a3b8" fontSize={9} fontWeight={800}>
+                                    ({impactValue})
+                                  </tspan>
+                                )}
+                              </text>
+                            </g>
+                          );
+                        }}
+                      />
+                    </Bar>
+                    <Bar dataKey="current" name={comparisonMonths.current || 'Atual'} fill="#EE1D23" radius={[0, 8, 8, 0]} barSize={14} minPointSize={2}>
+                      <LabelList 
+                        dataKey="current" 
+                        position="right" 
+                        content={(props: any) => {
+                          const { x, y, width, height, value, payload } = props;
+                          if (value === undefined || value === null) return null;
+                          const data = payload && payload.payload ? payload.payload : payload;
+                          const impactValue = (data && data.impact !== undefined) ? formatPercent(data.impact) : undefined;
+                          const yCenter = y + (height ? height / 2 : 7);
+                          return (
+                            <g>
+                              <text 
+                                x={x + width + 8} 
+                                y={yCenter} 
+                                dominantBaseline="central"
+                                fill="#EE1D23" 
+                                fontSize={10} 
+                                fontWeight={900} 
+                                textAnchor="start"
+                              >
+                                {typeof value === 'number' ? value.toLocaleString('pt-BR') : value}
+                                {impactValue !== undefined && (
+                                  <tspan dx={6} fill="#64748b" fontSize={9} fontWeight={800}>
+                                    ({impactValue})
+                                  </tspan>
+                                )}
+                              </text>
+                            </g>
+                          );
+                        }}
+                      />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+
           {/* Volume por Terminal Chart */}
           <div className="lg:col-span-3 bg-white p-8 rounded-3xl shadow-md border border-slate-100">
-            <div className="flex items-center justify-between mb-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center">
                   <Cpu className="w-5 h-5 text-[#EE1D23]" />
                 </div>
                 <div>
                   <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tighter">Volume por Terminal</h3>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Top 15 Terminais por Volume de Atendimento</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Top 15 Terminais por Volume • Clique para filtrar</p>
                 </div>
               </div>
-              <div className="flex gap-4">
+              <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-[#cbd5e1]" />
                   <span className="text-[9px] font-bold text-slate-500 uppercase">{comparisonMonths.previous}</span>
@@ -3050,11 +3798,30 @@ export default function App() {
                   <div className="w-2 h-2 rounded-full bg-[#EE1D23]" />
                   <span className="text-[9px] font-bold text-slate-500 uppercase">{comparisonMonths.current}</span>
                 </div>
+                {filters.terminal && !filters.terminal.includes('Todos') && filters.terminal.length > 0 && (
+                  <button
+                    onClick={() => setFilters(f => ({ ...f, terminal: ['Todos'] }))}
+                    className="text-[10px] font-black text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded-xl transition-colors flex items-center gap-1"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    {filters.terminal.join(', ')}
+                  </button>
+                )}
               </div>
             </div>
             <div className="h-[600px] w-full min-h-[600px]">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <BarChart data={terminalData} layout="vertical" margin={{ left: 250, right: 60, top: 10, bottom: 10 }}>
+                <BarChart 
+                  data={terminalData} 
+                  layout="vertical" 
+                  margin={{ left: 250, right: 60, top: 10, bottom: 10 }}
+                  onClick={(data) => {
+                    if (data && data.activeLabel) {
+                      handleTerminalClick(String(data.activeLabel));
+                    }
+                  }}
+                  className="cursor-pointer"
+                >
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                   <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10, fontWeight: 600 }} />
                   <YAxis 
@@ -3073,7 +3840,13 @@ export default function App() {
                   <Bar dataKey="previous" name={comparisonMonths.previous || 'Anterior'} fill="#cbd5e1" radius={[0, 8, 8, 0]} barSize={15}>
                     <LabelList dataKey="previous" position="right" style={{ fill: '#94a3b8', fontSize: 10, fontWeight: 900 }} offset={10} />
                   </Bar>
-                  <Bar dataKey="current" name={comparisonMonths.current || 'Atual'} fill="#EE1D23" radius={[0, 8, 8, 0]} barSize={15}>
+                  <Bar dataKey="current" name={comparisonMonths.current || 'Atual'} radius={[0, 8, 8, 0]} barSize={15}>
+                    {terminalData.map((entry, index) => (
+                      <Cell 
+                        key={`cell-terminal-${index}`} 
+                        fill={filters.terminal && filters.terminal.includes(entry.name) ? '#991B1B' : '#EE1D23'} 
+                      />
+                    ))}
                     <LabelList dataKey="current" position="right" style={{ fill: '#EE1D23', fontSize: 10, fontWeight: 900 }} offset={10} />
                   </Bar>
                 </BarChart>
@@ -3083,17 +3856,17 @@ export default function App() {
 
           {/* Volume por Grupo de Baixa Chart */}
           <div className="lg:col-span-3 bg-white p-8 rounded-3xl shadow-md border border-slate-100">
-            <div className="flex items-center justify-between mb-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center">
                   <Filter className="w-5 h-5 text-[#EE1D23]" />
                 </div>
                 <div>
                   <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tighter">Volume por Grupo de Baixa</h3>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Distribuição por categoria de encerramento</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Distribuição por categoria • Clique para filtrar</p>
                 </div>
               </div>
-              <div className="flex gap-4">
+              <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-[#cbd5e1]" />
                   <span className="text-[9px] font-bold text-slate-500 uppercase">{comparisonMonths.previous}</span>
@@ -3102,11 +3875,32 @@ export default function App() {
                   <div className="w-2 h-2 rounded-full bg-[#EE1D23]" />
                   <span className="text-[9px] font-bold text-slate-500 uppercase">{comparisonMonths.current}</span>
                 </div>
+                {!filters.grupoBaixa.includes('Todos') && filters.grupoBaixa.length > 0 && (
+                  <button
+                    onClick={() => setFilters(f => ({ ...f, grupoBaixa: ['Todos'] }))}
+                    className="text-[10px] font-black text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded-xl transition-colors flex items-center gap-1"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    {filters.grupoBaixa.join(', ')}
+                  </button>
+                )}
               </div>
             </div>
             <div className="w-full" style={{ height: `${Math.max(600, grupoBaixaData.length * 38)}px` }}>
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <BarChart data={grupoBaixaData} layout="vertical" margin={{ left: 20, right: 130, top: 10, bottom: 10 }} barGap={4} barCategoryGap={12}>
+                <BarChart 
+                  data={grupoBaixaData} 
+                  layout="vertical" 
+                  margin={{ left: 20, right: 130, top: 10, bottom: 10 }} 
+                  barGap={4} 
+                  barCategoryGap={12}
+                  onClick={(data) => {
+                    if (data && data.activeLabel) {
+                      handleGrupoBaixaClick(String(data.activeLabel));
+                    }
+                  }}
+                  className="cursor-pointer"
+                >
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                   <XAxis type="number" hide />
                   <YAxis 
@@ -3156,7 +3950,13 @@ export default function App() {
                       }}
                     />
                   </Bar>
-                  <Bar dataKey="current" name={comparisonMonths.current || 'Atual'} fill="#EE1D23" radius={[0, 8, 8, 0]} barSize={12} minPointSize={2}>
+                  <Bar dataKey="current" name={comparisonMonths.current || 'Atual'} radius={[0, 8, 8, 0]} barSize={12} minPointSize={2}>
+                    {grupoBaixaData.map((entry, index) => (
+                      <Cell 
+                        key={`cell-grupo-${index}`} 
+                        fill={filters.grupoBaixa.includes(entry.name) ? '#991B1B' : '#EE1D23'} 
+                      />
+                    ))}
                     <LabelList 
                       dataKey="current" 
                       position="right" 
@@ -3237,6 +4037,12 @@ export default function App() {
                   data={topNodes} 
                   layout="vertical"
                   margin={{ top: 5, right: 50, left: 40, bottom: 5 }}
+                  onClick={(data) => {
+                    if (data && data.activeLabel) {
+                      handleNodeClick(String(data.activeLabel));
+                    }
+                  }}
+                  className="cursor-pointer"
                 >
                   <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
                   <XAxis type="number" hide />
@@ -3264,17 +4070,23 @@ export default function App() {
                   <Bar 
                     dataKey="current" 
                     name={comparisonMonths.current || 'Atual'}
-                    fill="#EE1D23" 
                     radius={[0, 8, 8, 0]} 
                     barSize={12}
-                    label={{ 
-                      position: 'right', 
-                      fill: '#EE1D23', 
-                      fontSize: 10, 
-                      fontWeight: 900,
-                      offset: 10
-                    }}
-                  />
+                  >
+                    {topNodes.map((entry, index) => (
+                      <Cell 
+                        key={`cell-node-${index}`} 
+                        fill={selectedNodes.includes(entry.name) ? '#991B1B' : '#EE1D23'} 
+                      />
+                    ))}
+                    <LabelList 
+                      dataKey="current" 
+                      position="right" 
+                      fill="#EE1D23" 
+                      style={{ fontSize: 10, fontWeight: 900 }}
+                      offset={10}
+                    />
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -3318,6 +4130,18 @@ export default function App() {
                   data={topBaixas} 
                   layout="vertical"
                   margin={{ top: 5, right: 140, left: 10, bottom: 5 }}
+                  onClick={(data: any) => {
+                    if (data && data.activePayload && data.activePayload.length) {
+                      const item = data.activePayload[0].payload;
+                      if (item && item.name) {
+                        handleBaixaClick(String(item.name));
+                      }
+                    } else if (data && data.activeLabel) {
+                      const match = topBaixas.find(b => b.displayName === data.activeLabel || b.name === data.activeLabel);
+                      if (match) handleBaixaClick(match.name);
+                    }
+                  }}
+                  className="cursor-pointer"
                 >
                   <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
                   <XAxis type="number" hide />
@@ -3405,10 +4229,15 @@ export default function App() {
                   <Bar 
                     dataKey="current" 
                     name={comparisonMonths.current || 'Atual'}
-                    fill="#EE1D23" 
                     radius={[0, 8, 8, 0]} 
                     barSize={12}
                   >
+                    {topBaixas.map((entry, index) => (
+                      <Cell 
+                        key={`cell-baixa-${index}`} 
+                        fill={selectedBaixas.includes(entry.name) ? '#991B1B' : '#EE1D23'} 
+                      />
+                    ))}
                     <LabelList 
                       dataKey="current" 
                       position="right" 
@@ -3417,7 +4246,6 @@ export default function App() {
                         if (!value) return null;
                         const yCenter = y + (height ? height / 2 : 6);
                         
-                        // Access nested data safely
                         const data = payload && payload.payload ? payload.payload : payload;
                         if (!data) return (
                           <g>
@@ -3539,6 +4367,12 @@ export default function App() {
                   layout="vertical" 
                   margin={{ left: 40, right: 100, top: 10, bottom: 10 }}
                   barGap={4}
+                  onClick={(data) => {
+                    if (data && data.activeLabel) {
+                      handleCityClick(String(data.activeLabel));
+                    }
+                  }}
+                  className="cursor-pointer"
                 >
                   <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
                   <XAxis type="number" hide />
@@ -3580,7 +4414,13 @@ export default function App() {
                       }}
                     />
                   </Bar>
-                  <Bar dataKey="current" fill="#EE1D23" radius={[0, 4, 4, 0]} barSize={12}>
+                  <Bar dataKey="current" radius={[0, 4, 4, 0]} barSize={12}>
+                    {at1ByCityData.map((entry, index) => (
+                      <Cell 
+                        key={`cell-at1-city-${index}`} 
+                        fill={filters.cidade.includes(entry.name) ? '#991B1B' : '#EE1D23'} 
+                      />
+                    ))}
                     <LabelList 
                       dataKey="current" 
                       position="right" 
@@ -3607,20 +4447,43 @@ export default function App() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <p className="text-[10px] text-slate-400 font-bold italic mt-4">* Projeção baseada em OS Executadas / Dias Trab * Dias Mês / Base.</p>
+            <p className="text-[10px] text-slate-400 font-bold italic mt-4">* Projeção baseada em OS Executadas / Dias Trab * Dias Mês / Base. Clique para filtrar.</p>
           </div>
 
           {/* Base por Tecnologia */}
           <div className="bg-white p-8 rounded-3xl shadow-md border border-slate-100">
-            <div className="flex items-center gap-3 mb-8">
-              <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center">
-                <Cpu className="w-5 h-5 text-[#EE1D23]" />
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center">
+                  <Cpu className="w-5 h-5 text-[#EE1D23]" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tight">Base de Clientes por Tecnologia</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Distribuição por tecnologia • Clique para filtrar</p>
+                </div>
               </div>
-              <h3 className="text-lg font-black text-[#333333] uppercase italic tracking-tight">Base de Clientes por Tecnologia</h3>
+              {!filters.tecnologia.includes('Todos') && filters.tecnologia.length > 0 && (
+                <button
+                  onClick={() => setFilters(f => ({ ...f, tecnologia: ['Todos'] }))}
+                  className="text-[10px] font-black text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded-xl transition-colors flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  {filters.tecnologia.join(', ')}
+                </button>
+              )}
             </div>
             <div className="h-[350px] w-full min-h-[350px]">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                <BarChart data={baseMetrics.techData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                <BarChart 
+                  data={baseMetrics.techData} 
+                  margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+                  onClick={(data) => {
+                    if (data && data.activeLabel) {
+                      handleTechClick(String(data.activeLabel));
+                    }
+                  }}
+                  className="cursor-pointer"
+                >
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis 
                     dataKey="name" 
@@ -3640,7 +4503,13 @@ export default function App() {
                       ];
                     }}
                   />
-                  <Bar dataKey="value" fill="#EE1D23" radius={[8, 8, 0, 0]} barSize={60}>
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]} barSize={60}>
+                    {baseMetrics.techData.map((entry, index) => (
+                      <Cell 
+                        key={`cell-base-tech-${index}`} 
+                        fill={filters.tecnologia.includes(entry.name) ? '#991B1B' : '#EE1D23'} 
+                      />
+                    ))}
                     <LabelList 
                       dataKey="value" 
                       position="top" 
@@ -3654,8 +4523,15 @@ export default function App() {
           </div>
         </div>
         </main>
+
+        {/* Visão Analítica de Ordens de Serviço (AT1) */}
+        <div className="mt-12">
+          <At1AnaliticoTable data={filteredData} totalDataCount={baseData.length} />
+        </div>
             </>
           )}
+        </>
+      )}
           </div>
 
           <div className={activeTab === 'outage' ? 'block' : 'hidden'}>
@@ -3669,7 +4545,10 @@ export default function App() {
           </div>
 
           <div className={activeTab === 'qoe-gpon' ? 'block' : 'hidden'}>
-            <QoeGponDashboard />
+            <QoeGponDashboard 
+              initialData={sharedQoeData} 
+              onDataChange={setSharedQoeData} 
+            />
           </div>
 
           <div className={activeTab === 'at5' ? 'block' : 'hidden'}>

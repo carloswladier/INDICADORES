@@ -105,16 +105,29 @@ export function parseStreetAndNumber(rawAddress: string): { street: string; numb
 
 export interface QoeGponDashboardProps {
   initialData?: QoeGponRow[];
+  onDataChange?: (data: QoeGponRow[]) => void;
 }
 
-export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps) {
-  // State for dataset: empty by default so user sees the welcome screen (unless initialData is passed)
-  const [data, setData] = useState<QoeGponRow[]>(() => initialData || []);
+export default function QoeGponDashboard({ initialData, onDataChange }: QoeGponDashboardProps) {
+  // State for dataset: by default initialize with sample GPON QOE data so initial screen immediately displays QOE GPON data
+  const [data, setData] = useState<QoeGponRow[]>(() => {
+    if (initialData && initialData.length > 0) return initialData;
+    return generateSampleQoeGponData();
+  });
   const [fileName, setFileName] = useState<string>('Base Padrão GPON QOE');
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [importProgress, setImportProgress] = useState<number>(0);
+  const cancelImportRef = useRef<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync back to parent if provided
+  useEffect(() => {
+    if (onDataChange) {
+      onDataChange(data);
+    }
+  }, [data, onDataChange]);
 
   // Selected city for detailed Node Summary / QoE memory calculation card
   const [selectedCityQoe, setSelectedCityQoe] = useState<string>('ANANINDEUA');
@@ -971,6 +984,8 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
       throw new Error('A planilha está vazia ou não contém linhas de dados válidas.');
     }
 
+    if (cancelImportRef.current) return;
+
     // Map spreadsheet rows to QoeGponRow model
     const parsedRows: QoeGponRow[] = json.map((r, idx) => {
       // Prioritized key lookups: checks highest priority target first, preferring exact match over substring match
@@ -1153,17 +1168,36 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
 
   // Upload Local File
   const processUploadedFile = async (file: File) => {
+    cancelImportRef.current = false;
     setIsUploading(true);
     setUploadError(null);
+    setImportProgress(15);
 
     try {
+      await new Promise(r => setTimeout(r, 60));
+      if (cancelImportRef.current) return;
+
+      setImportProgress(35);
       const dataBuffer = await file.arrayBuffer();
+      if (cancelImportRef.current) return;
+
+      setImportProgress(65);
+      await new Promise(r => setTimeout(r, 60));
+      if (cancelImportRef.current) return;
+
       processWorkbookBuffer(dataBuffer, file.name);
+      if (cancelImportRef.current) return;
+
+      setImportProgress(100);
+      await new Promise(r => setTimeout(r, 350));
     } catch (err: any) {
-      console.error('Erro ao ler arquivo Excel/CSV:', err);
-      setUploadError(err.message || 'Falha ao processar arquivo. Verifique o formato do arquivo.');
+      if (!cancelImportRef.current) {
+        console.error('Erro ao ler arquivo Excel/CSV:', err);
+        setUploadError(err.message || 'Falha ao processar arquivo. Verifique o formato do arquivo.');
+      }
     } finally {
       setIsUploading(false);
+      setImportProgress(0);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -1173,26 +1207,39 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
     const targetUrl = customUrl || (githubUrl && githubUrl.trim()) || getGithubQoeGponUrl();
     if (!targetUrl) return;
 
+    cancelImportRef.current = false;
     setIsUploading(true);
     setIsGithubLoading(true);
     setUploadError(null);
+    setImportProgress(15);
 
     try {
+      setImportProgress(35);
       const arrayBuffer = await fetchGithubFileArrayBuffer(targetUrl);
+      if (cancelImportRef.current) return;
+
+      setImportProgress(70);
       processWorkbookBuffer(arrayBuffer, 'QOE_GPON (GitHub)');
+      if (cancelImportRef.current) return;
+
       setShowGithubInput(false);
       setExportSuccessMessage('Sincronização com GitHub concluída com sucesso! Dados atualizados.');
       setTimeout(() => setExportSuccessMessage(null), 5000);
+      setImportProgress(100);
+      await new Promise(r => setTimeout(r, 350));
     } catch (err: any) {
-      console.warn('Falha no GitHub sync QOE GPON:', err);
-      // Fallback: load reference dataset
-      setData(generateSampleQoeGponData());
-      setFileName('Base Padrão GPON QOE');
-      resetFilters();
-      setUploadError(`Sincronização com GitHub: ${err.message || 'arquivo não encontrado no repositório'}. Base padrão de referência carregada.`);
+      if (!cancelImportRef.current) {
+        console.warn('Falha no GitHub sync QOE GPON:', err);
+        // Fallback: load reference dataset
+        setData(generateSampleQoeGponData());
+        setFileName('Base Padrão GPON QOE');
+        resetFilters();
+        setUploadError(`Sincronização com GitHub: ${err.message || 'arquivo não encontrado no repositório'}. Base padrão de referência carregada.`);
+      }
     } finally {
       setIsUploading(false);
       setIsGithubLoading(false);
+      setImportProgress(0);
     }
   };
 
@@ -1334,23 +1381,42 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
         className="hidden" 
       />
 
-      {/* Loading Modal */}
+      {/* Loading Modal - Exato formato com barra de progresso, percentual e cancelar (conforme imagem do usuário) */}
       {isUploading && (
         <div className="fixed inset-0 z-[100] bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center p-6">
           <div className="w-full max-w-md bg-white p-8 rounded-[32px] shadow-2xl border border-slate-100 text-center">
             <div className="w-20 h-20 bg-red-50 rounded-2xl flex items-center justify-center mb-6 mx-auto animate-pulse">
-              <Network className="w-10 h-10 text-[#EE1D23]" />
+              <RotateCcw className="w-10 h-10 text-[#EE1D23]" />
             </div>
-            <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight mb-2">
-              Processando Planilha GPON...
+            <h3 className="text-2xl font-black text-[#333333] uppercase italic tracking-tighter mb-2">
+              IMPORTANDO BASE QOE GPON
             </h3>
-            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-6">
-              Mapeando siglas de OLTs, potências ópticas e parâmetros de QOE
+            <p className="text-slate-500 font-bold mb-8 italic">
+              Lendo contratos, potências ópticas e parâmetros de QOE...
             </p>
-            <div className="flex items-center justify-center gap-2 text-xs font-black text-[#EE1D23]">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Aguarde um momento...</span>
+            
+            <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden mb-4">
+              <div 
+                className="h-full bg-[#EE1D23] transition-all duration-300 ease-out"
+                style={{ width: `${importProgress}%` }}
+              />
             </div>
+            <div className="flex justify-between items-center px-1">
+              <span className="text-xs font-black text-[#EE1D23] uppercase tracking-widest">{importProgress}%</span>
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">AGUARDE...</span>
+            </div>
+            
+            <button
+              onClick={() => {
+                cancelImportRef.current = true;
+                setIsUploading(false);
+                setIsGithubLoading(false);
+                setImportProgress(0);
+              }}
+              className="mt-8 text-xs font-black text-slate-400 hover:text-red-500 uppercase tracking-widest transition-colors cursor-pointer"
+            >
+              CANCELAR
+            </button>
           </div>
         </div>
       )}
@@ -1368,33 +1434,34 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
         </div>
       )}
 
-      {/* INITIAL / WELCOME STATE: Exact pattern matching user screenshot */}
+      {/* INITIAL / WELCOME STATE: Exact pattern customized for QOE GPON */}
       {data.length === 0 ? (
-        <section className="max-w-2xl mx-auto mt-8 sm:mt-12 px-4 w-full">
+        <section className="max-w-3xl mx-auto mt-8 sm:mt-12 px-4 w-full">
           <motion.div 
             initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
             className="bg-white p-6 sm:p-8 rounded-3xl shadow-xl border border-slate-100 text-center flex flex-col items-center"
           >
-            {/* Top Red Document Icon in Soft Red Squircle */}
+            {/* Top Red Network Icon in Soft Red Squircle */}
             <div className="w-14 h-14 bg-red-50 rounded-2xl flex items-center justify-center mb-4 shadow-2xs">
-              <FileSpreadsheet className="w-7 h-7 text-[#EE1D23]" />
+              <Network className="w-7 h-7 text-[#EE1D23]" />
             </div>
 
             {/* Headline */}
             <h2 className="text-xl sm:text-2xl font-black text-[#333333] uppercase italic tracking-tight mb-2">
-              Bem-vindo ao Dashboard Indicadores de Manutenção
+              Bem-vindo ao Dashboard QOE GPON
             </h2>
 
             {/* Subtitle */}
-            <p className="text-slate-500 font-bold text-xs max-w-md mb-6 leading-relaxed uppercase tracking-wide opacity-65">
-              Clique no botão para sincronizar com o GitHub, importar uma planilha Excel ou carregar dados de exemplo.
+            <p className="text-slate-500 font-bold text-xs max-w-lg mb-6 leading-relaxed uppercase tracking-wide opacity-75">
+              Monitoramento de potências ópticas (RX ONT Cliente), topologias, OLTs, temperatura dos equipamentos e parâmetros de qualidade da rede de fibra GPON.
             </p>
 
-            {/* 3 Action Buttons matching image */}
+            {/* 3 Action Buttons */}
             <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
               {/* Sincronizar GitHub */}
               <button
+                id="btn-sync-github-qoe-welcome"
                 onClick={() => handleGithubLoad(getGithubQoeGponUrl())}
                 disabled={isUploading}
                 className="flex items-center gap-2 bg-[#EE1D23] hover:bg-red-600 text-white font-black py-2.5 px-5 rounded-xl transition-all shadow-md shadow-red-500/15 active:scale-95 uppercase italic text-xs cursor-pointer disabled:opacity-50"
@@ -1405,15 +1472,17 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
 
               {/* Importar Excel */}
               <button
+                id="btn-upload-excel-qoe-welcome"
                 onClick={() => fileInputRef.current?.click()}
                 className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-800 font-black py-2.5 px-5 rounded-xl border border-slate-200 transition-all shadow-2xs active:scale-95 uppercase italic text-xs cursor-pointer"
               >
                 <Upload className="w-3.5 h-3.5 text-[#EE1D23]" />
-                <span>Importar Excel</span>
+                <span>Importar Excel / CSV</span>
               </button>
 
               {/* Dados Exemplo */}
               <button
+                id="btn-sample-data-qoe-welcome"
                 onClick={() => {
                   setData(generateSampleQoeGponData());
                   setFileName('Base Padrão GPON QOE');
@@ -1422,29 +1491,56 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
                 className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-4 rounded-xl transition-all shadow-2xs active:scale-95 uppercase italic text-xs cursor-pointer"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
-                <span>Dados Exemplo</span>
+                <span>Dados Exemplo GPON</span>
               </button>
             </div>
             
-            {/* Bottom 3 Feature Badges matching image */}
+            {/* Bottom 3 Feature Badges for QOE GPON */}
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4 w-full border-t border-slate-100 pt-5">
               <div className="flex flex-col items-center">
-                <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center mb-1.5">
-                  <BarChart3 className="w-4 h-4 text-slate-400" />
+                <div className="w-8 h-8 bg-red-50 rounded-lg flex items-center justify-center mb-1.5">
+                  <Zap className="w-4 h-4 text-[#EE1D23]" />
                 </div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Volume Diário</p>
+                <p className="text-[10px] font-black text-slate-700 uppercase tracking-wider">Potência Óptica (RX)</p>
+                <p className="text-[9px] font-bold text-slate-400 mt-0.5">Faixas Normal, Alerta e Crítico</p>
               </div>
               <div className="flex flex-col items-center">
                 <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center mb-1.5">
-                  <Activity className="w-4 h-4 text-slate-400" />
+                  <Network className="w-4 h-4 text-slate-600" />
                 </div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Performance G1</p>
+                <p className="text-[10px] font-black text-slate-700 uppercase tracking-wider">OLTs & Topologias</p>
+                <p className="text-[9px] font-bold text-slate-400 mt-0.5">Mapeamento por Siglas e Portas</p>
               </div>
               <div className="flex flex-col items-center">
                 <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center mb-1.5">
-                  <MapPin className="w-4 h-4 text-slate-400" />
+                  <Activity className="w-4 h-4 text-slate-600" />
                 </div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Visão por Cidade</p>
+                <p className="text-[10px] font-black text-slate-700 uppercase tracking-wider">Temperatura & Status</p>
+                <p className="text-[9px] font-bold text-slate-400 mt-0.5">Detecção de Anomalias (&gt;52 ºC)</p>
+              </div>
+            </div>
+
+            {/* Quick Reference Thresholds for QOE GPON */}
+            <div className="mt-5 w-full grid grid-cols-2 sm:grid-cols-4 gap-2 pt-4 border-t border-slate-100 text-left">
+              <div className="bg-emerald-50/70 border border-emerald-200/70 rounded-xl p-2.5">
+                <span className="text-[9px] font-black text-emerald-800 uppercase block tracking-wider">Faixa Verde</span>
+                <span className="text-xs font-black text-emerald-700 block mt-0.5">&gt; -25 dBm</span>
+                <span className="text-[9px] text-emerald-600 font-bold">Sinal Adequado</span>
+              </div>
+              <div className="bg-amber-50/70 border border-amber-200/70 rounded-xl p-2.5">
+                <span className="text-[9px] font-black text-amber-800 uppercase block tracking-wider">Faixa Laranja</span>
+                <span className="text-xs font-black text-amber-700 block mt-0.5">-25 a -26.99 dBm</span>
+                <span className="text-[9px] text-amber-600 font-bold">Atenção</span>
+              </div>
+              <div className="bg-yellow-50/70 border border-yellow-200/70 rounded-xl p-2.5">
+                <span className="text-[9px] font-black text-yellow-800 uppercase block tracking-wider">Faixa Amarela</span>
+                <span className="text-xs font-black text-yellow-700 block mt-0.5">-27 a -27.99 dBm</span>
+                <span className="text-[9px] text-yellow-600 font-bold">Alerta Elevado</span>
+              </div>
+              <div className="bg-red-50/70 border border-red-200/70 rounded-xl p-2.5">
+                <span className="text-[9px] font-black text-red-800 uppercase block tracking-wider">Faixa Vermelha</span>
+                <span className="text-xs font-black text-red-700 block mt-0.5">&le; -28 dBm</span>
+                <span className="text-[9px] text-red-600 font-bold">Crítico</span>
               </div>
             </div>
           </motion.div>
@@ -1619,8 +1715,8 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
               </div>
             </div>
 
-            {/* Filters Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-3.5">
+            {/* Filters Grid with enhanced spacing and widths for OLT, Topologia and other filters */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 xl:grid-cols-12 gap-3.5">
               {/* MÊS */}
               <MultiFilterSelect
                 label="Mês"
@@ -1630,6 +1726,8 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
                 optionCounts={filterOptions.mesesCounts}
                 onChange={(v) => setFilters(f => ({ ...f, mes: v }))}
                 placeholder="Todos os meses"
+                className="xl:col-span-1 lg:col-span-1"
+                dropdownClassName="w-max min-w-[260px] sm:min-w-[280px]"
               />
 
               {/* CIDADE (com mapeamento OLT) */}
@@ -1641,9 +1739,11 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
                 optionCounts={filterOptions.cidadesCounts}
                 onChange={(v) => setFilters(f => ({ ...f, cidade: v }))}
                 placeholder="Todas as cidades"
+                className="xl:col-span-2 lg:col-span-2"
+                dropdownClassName="w-max min-w-[300px] sm:min-w-[340px] max-w-[92vw]"
               />
 
-              {/* OLT */}
+              {/* OLT - Espaçamento ampliado e menu largo sem cortes */}
               <MultiFilterSelect
                 label="OLT"
                 icon={<Server className="w-3.5 h-3.5" />}
@@ -1652,9 +1752,11 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
                 optionCounts={filterOptions.oltsCounts}
                 onChange={(v) => setFilters(f => ({ ...f, olt: v }))}
                 placeholder="Todas as OLTs"
+                className="sm:col-span-2 md:col-span-1 lg:col-span-3 xl:col-span-2"
+                dropdownClassName="w-max min-w-[360px] sm:min-w-[420px] max-w-[92vw] shadow-2xl"
               />
 
-              {/* TOPOLOGIA */}
+              {/* TOPOLOGIA - Espaçamento ampliado e menu largo sem cortes */}
               <MultiFilterSelect
                 label="Topologia"
                 icon={<Network className="w-3.5 h-3.5" />}
@@ -1663,6 +1765,8 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
                 optionCounts={filterOptions.topologiasCounts}
                 onChange={(v) => setFilters(f => ({ ...f, topologia: v }))}
                 placeholder="Todas as topologias"
+                className="sm:col-span-2 md:col-span-1 lg:col-span-3 xl:col-span-2"
+                dropdownClassName="w-max min-w-[360px] sm:min-w-[420px] max-w-[92vw] shadow-2xl"
               />
 
               {/* MODELO (NM_MODELO) */}
@@ -1674,6 +1778,8 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
                 optionCounts={filterOptions.modelosCounts}
                 onChange={(v) => setFilters(f => ({ ...f, modelo: v }))}
                 placeholder="Todos os modelos"
+                className="xl:col-span-1 lg:col-span-2"
+                dropdownClassName="w-max min-w-[300px] sm:min-w-[340px] max-w-[92vw]"
               />
 
               {/* STATUS */}
@@ -1685,6 +1791,7 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
                 optionCounts={filterOptions.statusesCounts}
                 onChange={(v) => setFilters(f => ({ ...f, status: v }))}
                 placeholder="Todos os status"
+                className="xl:col-span-1 lg:col-span-1"
               />
 
               {/* TEMPERATURA (<52 E >52) */}
@@ -1697,6 +1804,7 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
                 getOptionLabel={(opt) => opt === '< 52' ? 'Normal (< 52 ºC)' : 'Crítica (> 52 ºC)'}
                 onChange={(v) => setFilters(f => ({ ...f, temperatura: v }))}
                 placeholder="Todas as temperaturas"
+                className="xl:col-span-1 lg:col-span-1"
               />
 
               {/* RX_ONT_CLIENTE */}
@@ -1715,10 +1823,13 @@ export default function QoeGponDashboard({ initialData }: QoeGponDashboardProps)
                 }}
                 onChange={(v) => setFilters(f => ({ ...f, rxOnt: v }))}
                 placeholder="Todas as faixas"
+                className="xl:col-span-1 lg:col-span-1"
+                dropdownAlign="right"
+                dropdownClassName="w-max min-w-[280px] sm:min-w-[320px] max-w-[92vw]"
               />
 
               {/* CONTRATO */}
-              <div className="space-y-1.5 flex flex-col justify-end">
+              <div className="space-y-1.5 flex flex-col justify-end xl:col-span-1 lg:col-span-1">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 ml-1 h-5 whitespace-nowrap overflow-hidden text-ellipsis">
                   <Hash className="w-3.5 h-3.5 text-[#EE1D23] shrink-0" />
                   <span className="truncate">Contrato</span>
