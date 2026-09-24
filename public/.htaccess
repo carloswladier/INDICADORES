@@ -1,0 +1,23 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Permite envio de cabeçalhos de autenticação e variáveis customizadas
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+  RewriteRule .* - [E=HTTP_X_DB_USER:%{HTTP:x-db-user}]
+  RewriteRule .* - [E=HTTP_X_DB_PASSWORD:%{HTTP:x-db-password}]
+  RewriteRule .* - [E=HTTP_X_DB_NAME:%{HTTP:x-db-name}]
+  RewriteRule .* - [E=HTTP_X_DB_HOST:%{HTTP:x-db-host}]
+
+  # Redireciona todas as chamadas /api/* diretamente para o api.php
+  RewriteRule ^api/(.*)$ api.php?endpoint=$1 [QSA,L]
+  RewriteRule ^api$ api.php [QSA,L]
+
+  # Se o arquivo ou diretório físico existir (ex: assets, api.php), serve diretamente
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Fallback de SPA para o index.html
+  RewriteRule ^ index.html [L]
+</IfModule>

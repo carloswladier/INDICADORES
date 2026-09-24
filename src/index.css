@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+/* Leaflet Custom Styles */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  border-radius: 0 0 32px 32px;
+}
+
+.custom-popup .leaflet-popup-content-wrapper {
+  border-radius: 24px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+
+.custom-popup .leaflet-popup-content {
+  margin: 0;
+}
+
+.custom-popup .leaflet-popup-tip-container {
+  display: none;
+}
+
+.modem-marker-container:hover {
+  transform: scale(1.2) rotate(0deg) !important;
+  z-index: 1000 !important;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3) !important;
+}
+
+.custom-cluster-icon > div:hover {
+  transform: scale(1.15) !important;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3) !important;
+  border-color: #EE1D23 !important;
+}
